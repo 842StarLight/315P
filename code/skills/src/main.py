@@ -75,7 +75,23 @@ class Drivetrain:
         self.gear_ratio = gear_ratio
         self.wheel_diameter = wheel_diameter
         self.wheelbase = wheelbase
-    def drive4(self, inches, speed=90, timeout=3):
+    def drive4(self, inches, speed=100):
+        '''
+        ### I think this is the mosted using dt auton function; it simply drives a number of inches.
+        We are planning to eventually add a PID loop or something here later on.
+        A custom timeout solution end the command and moves on if the robot gets stuck or takes too long.
+
+        #### Arguments:
+            inches: how far to drive, in inches forward. Negative values are accepted and interpreted as inches backwards.
+            speed (>0, <100): speed of both sides, in percent
+        #### Returns:
+            None
+        #### Examples:
+            # slowly drive 24 inches (one tile):
+            dt.drive4(24, speed=25)
+            # drives across three tiles
+            dt.drive4(24*3)
+        '''
         # speeds
         dt_left.set_velocity(speed, PERCENT)
         dt_right.set_velocity(speed, PERCENT)
@@ -95,7 +111,23 @@ class Drivetrain:
         dt_right.stop()
         # logging
         print("drive4/done", inches, "in, took", brain.timer.time(SECONDS)-old_time, 'sec')
-    def turn2(self, angle_unmodded, speed=30):
+    def turn2(self, angle_unmodded, speed=41):
+        '''
+        ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
+
+        #### Arguments:
+            angle_unmodded: angle turning to, in degrees clockwise. Negative inputs are allowed and will be interpreted as degrees counterclockwise. Reference point is set during calibration
+            speed (>0, <100): absolute speeds of both sides, in percent (41 has been empirically derived to be the fastest)
+        #### Returns:
+            None
+        #### Examples:
+            # slowly turn to a heading of 180˚:
+            dt.turn2(180, speed=15)
+            # draws a square
+            for i in range(4):
+                dt.turn2(i*90)
+                dt.drive4(10)
+        '''
         # constants
         angle = angle_unmodded % 360
         # initial heading
@@ -116,15 +148,26 @@ class Drivetrain:
         # rerun if drift
         if abs(angle - orientation.heading(DEGREES)) % 360 > 1:
             self.turn2(angle, speed=10)
-    def fastarc(self, rad, head, side, duration, speed=25):
-        """
-        Inputs:
-        rad (>0): Radius of arc, in inches
-        head (FORWARD/REVERSE): whether the robot is moving for/backwards
-        side (LEFT/RIGHT): which side the robot is arc towards
-        duration: how long the arc should last, in seconds
-        speed: average speed of both sides, in percent
-        """
+    def arc(self, rad, head, side, duration, speed=65):
+        '''
+        ### An arc function which allows us to skip parts in autons where we alternate between turn2's and drive4's.
+
+        #### Arguments:
+            rad (>0): Radius of arc, in inches
+            head (FORWARD/REVERSE): whether the robot is moving for/backwards
+            side (LEFT/RIGHT): which side the robot is arc towards
+            duration (>0): how long the arc should last, in seconds
+            speed (>0, <100): average speed of both sides, in percen
+        #### Returns:
+            None
+        #### Examples:
+            # slowly draw a circle with diameter of 20in
+            dt.arc(10, FORWARD, RIGHT, 7, speed=25)
+            # draws a rounded square
+            for i in range(4):
+                dt.drive4(2)
+                dt.arc(5, FORWARD, RIGHT, 1.5, speed=65) # adjust duration to make this a quarter circle
+        '''
         # convert sides to numbers
         aside = 1 if side == RIGHT else -1
         ahead = 1 if head == FORWARD else -1
@@ -133,14 +176,39 @@ class Drivetrain:
         right = ahead*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
         # velocities
         sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
-        return left*sconst, right*sconst
         print('fastarc', rad, head, side, duration, speed)
-
+        # and away she goes!
         dt_right.spin(FORWARD, right*sconst*12/100, VOLT)
         dt_left.spin(FORWARD, left*sconst*12/100, VOLT)
+        # wait, then stop
         wait(duration, SECONDS)
         dt_left.stop()
         dt_right.stop()
+        # in case you need it - here's a simple fn to determine duration of an arc
+        '''
+        # assuming arc is already set up
+        # press B when arc should end
+        def arc_dur(self, rad, head, side, speed=65)
+            # convert sides to numbers
+            aside = 1 if side == RIGHT else -1
+            ahead = 1 if head == FORWARD else -1
+            # targets for each side
+            left = ahead*(rad+aside*self.wheelbase/2) # the parenthesized portion is the abs value
+            right = ahead*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
+            # velocities
+            sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
+            print('ARCTEST', rad, head, side, speed)
+            # and away she goes!
+            dt_right.spin(FORWARD, right*sconst*12/100, VOLT)
+            dt_left.spin(FORWARD, left*sconst*12/100, VOLT)
+            
+            initial_time = brain.timer.time(SECONDS)
+            while not controller_1.buttonB.pressing():
+                wait(1, MSEC)
+            dt_left.stop()
+            dt_right.stop()
+            print(brain.timer.time(SECONDS)-initial_time)
+        '''
         
        
 dt = Drivetrain(60/36, 3.25, 11)
@@ -249,7 +317,7 @@ def autonomous():
             orientation.set_heading(180, DEGREES)
         # arc back for right side push
         #dt.drive4(-6)
-        dt.fastarc(20, REVERSE, RIGHT, 1.5, speed=65)
+        dt.arc(20, REVERSE, RIGHT, 1.5, speed=65)
         dt.drive4(5)
         # reverse back & set up for next arc
         sstime = brain.timer.time(MSEC)
@@ -259,7 +327,7 @@ def autonomous():
         print(brain.timer.time(MSEC)-sstime)
         # this is an absolutely BEAUTIFUL arc
         cp.wings(OPEN)
-        dt.fastarc(11, REVERSE, LEFT, 1.3, speed=65)
+        dt.arc(11, REVERSE, LEFT, 1.3, speed=65)
         dt.drive4(-10)
         cp.wings(CLOSE)
         dt.drive4(5)
@@ -298,17 +366,3 @@ def autonomous():
 
 print("\033[2J") # clear console
 competition = Competition(driver_control, autonomous)
-"""
-# simple routine to determine duration of auton
-(ls, rs) = dt.arcalc()
-
-dt_right.spin(FORWARD, rs*12/100, VOLT)
-dt_left.spin(FORWARD, ls*12/100, VOLT)
-initial_time = brain.timer.time(SECONDS)
-final = -1
-while not controller_1.buttonB.pressing():
-    wait(1, MSEC)
-dt_left.stop()
-dt_right.stop()
-print(brain.timer.time(SECONDS)-initial_time)
-"""
