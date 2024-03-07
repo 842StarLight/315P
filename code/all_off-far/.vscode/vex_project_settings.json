@@ -1,0 +1,18 @@
+{
+	"project": {
+		"name": "all_off-far",
+		"slot": 2,
+		"description": "Offense (far-side) auton for alliances that don't have one. Simply scores the preload, at which point the alliance (315P) is able to score AWP through defense.",
+		"platform": "V5",
+		"creationDate": "Thu, 07 Mar 2024 17:11:27 GMT",
+		"language": "python",
+		"python": {
+			"main": "/src/main.py"
+		},
+		"sdkVersion": "V5_1_0_1_19"
+	},
+	"extension": {
+		"version": "0.5.0",
+		"json": 1
+	}
+}
