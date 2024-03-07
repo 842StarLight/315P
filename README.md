@@ -7,10 +7,10 @@ There is a bunch of stuff in this repo - here are the basics:
 * **media**: Mainly related to auton skills. I have pictures of our matchload arrangement and auton skills runs to analyze.
 
 IN PROG:
- [ ] Rewrite auton skills (again) (again).
- [ ] Add test code for printing EVERYTHING about the drivetrain.
+ - [ ] Rewrite auton skills (again) (again).
+ - [ ] Add test code for printing EVERYTHING about the drivetrain.
 
 TODO:
- [ ] Implement PID in turn and drive functions.
- [ ] Fix endgame driver controls.
- [ ] Continue improving the drivetrain architecture to be faster and lighter.
+ - [ ] Implement PID in turn and drive functions.
+ - [ ] Fix endgame driver controls.
+ - [ ] Continue improving the drivetrain architecture to be faster and lighter.
