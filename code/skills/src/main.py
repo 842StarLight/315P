@@ -97,7 +97,7 @@ class Drivetrain:
         dt_right.set_velocity(speed, PERCENT)
         # core spin
         dt_left.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
-        dt_right.spin_for(FORWARD, (nches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
+        dt_right.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
         # record initial time
         old_time = brain.timer.time(SECONDS)
         # loop to make sure we don't timeout before the dt has had a chance to accelerate
