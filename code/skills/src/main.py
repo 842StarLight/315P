@@ -268,7 +268,7 @@ def driver_control():
         dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VOLT)
         # logging
         logs = [
-            "time: %g" % brain.timer.time(SECONDS),
+            "time: %d:%g" % (floor(brain.timer.time(SECONDS)/60), int(brain.timer.time(SECONDS) % 60)),
             "dt: %d %d" % (dt_left.temperature(PERCENT), dt_right.temperature(PERCENT)),
             "cata: %d" % catapult.temperature(PERCENT),
         ]
