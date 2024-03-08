@@ -75,7 +75,7 @@ class Drivetrain:
         self.gear_ratio = gear_ratio
         self.wheel_diameter = wheel_diameter
         self.wheelbase = wheelbase
-    def drive4(self, inches, speed=100):
+    def drive4(self, inches, speed=100, timeout=10**2):
         '''
         ### I think this is the mosted using dt auton function; it simply drives a number of inches.
         We are planning to eventually add a PID loop or something here later on.
@@ -84,6 +84,7 @@ class Drivetrain:
         #### Arguments:
             inches: how far to drive, in inches forward. Negative values are accepted and interpreted as inches backwards.
             speed (>0, <100): speed of both sides, in percent
+            timeout (>0): DEPRECATED - do n
         #### Returns:
             None
         #### Examples:
@@ -98,19 +99,22 @@ class Drivetrain:
         # core spin
         dt_left.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
         dt_right.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
-        # record initial time
-        old_time = brain.timer.time(SECONDS)
-        # loop to make sure we don't timeout before the dt has had a chance to accelerate
-        while abs(dt_left.velocity(PERCENT)*dt_right.velocity(PERCENT)) < 5:
-            wait(2, MSEC)
+        # record initial time; let the dt accelerate
+        initial_time = brain.timer.time(SECONDS)
         wait(50, MSEC)
         # main timeout loop
-        while abs(dt_left.velocity(PERCENT)) > 5 and abs(dt_right.velocity(PERCENT)) > 5:
-            wait(50, MSEC)
+        while True:
+            is_not_moving = dt_left.is_done() or dt_left.velocity(PERCENT)*dt_right.velocity(PERCENT) == 0
+            timeouted = brain.timer.time(SECONDS)-initial_time >= timeout
+            print(is_not_moving, timeouted)
+            if timeouted or is_not_moving:
+                break
+            wait(10, MSEC)
+        # stop
         dt_left.stop()
         dt_right.stop()
         # logging
-        print("drive4/done", inches, "in, took", brain.timer.time(SECONDS)-old_time, 'sec')
+        print("drive4/done", inches, "in, took", brain.timer.time(SECONDS)-initial_time, 'sec')
     def turn2(self, angle_unmodded, speed=41):
         '''
         ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
@@ -130,6 +134,7 @@ class Drivetrain:
         '''
         # constants
         angle = angle_unmodded % 360
+        print(angle)
         # initial heading
         h = orientation.heading(DEGREES)
         # main loop
@@ -138,8 +143,8 @@ class Drivetrain:
             h = orientation.heading(DEGREES)
             vel = abs((angle - h + 180) % 360 - 180) * speed * 2 / 180 + 3
             # action!
-            dt_left.spin(FORWARD if (angle - h + 180) % 360 - 180 > 0 else REVERSE, vel*12/100, VOLT)
-            dt_right.spin(REVERSE if (angle - h + 180) % 360 - 180 > 0 else FORWARD, vel*12/100, VOLT)
+            dt_left.spin(FORWARD if (angle - h + 180) % 360 - 180 > 0 else REVERSE, vel, PERCENT)
+            dt_right.spin(REVERSE if (angle - h + 180) % 360 - 180 > 0 else FORWARD, vel, PERCENT)
             # wait
             wait(10, MSEC)
         # stop dt
@@ -268,7 +273,7 @@ def driver_control():
         dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VOLT)
         # logging
         logs = [
-            "time: %d:%g" % (floor(brain.timer.time(SECONDS)/60), int(brain.timer.time(SECONDS) % 60)),
+            "time: %d:%g" % (math.floor(brain.timer.time(SECONDS)/60), int(brain.timer.time(SECONDS) % 60)),
             "dt: %d %d" % (dt_left.temperature(PERCENT), dt_right.temperature(PERCENT)),
             "cata: %d" % catapult.temperature(PERCENT),
         ]
