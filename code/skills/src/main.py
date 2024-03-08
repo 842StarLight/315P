@@ -106,7 +106,8 @@ class Drivetrain:
         # main timeout loop
         while running:
             wait(10, MSEC)
-            if (abs (dt_left.velocity(PERCENT)) > 1 ):
+            # TODO: make these checks more elegant
+            if abs(dt_left.velocity(PERCENT)) > 1:
                 is_started = True
             is_not_moving = dt_left.is_done() or dt_left.velocity(PERCENT) == 0
             timeouted = brain.timer.time(SECONDS)-initial_time >= timeout
@@ -375,6 +376,4 @@ def autonomous():
 
 print("\033[2J") # clear console
 
-#competition = Competition(driver_control, autonomous)
-autonomous()
-driver_control()
+competition = Competition(driver_control, autonomous)
