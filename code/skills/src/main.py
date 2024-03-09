@@ -140,7 +140,7 @@ class Drivetrain:
         '''
         # constants
         angle = angle_unmodded % 360
-        print(angle)
+        initial_time = brain.timer.time(SECONDS)
         # initial heading
         h = orientation.heading(DEGREES)
         # main loop
@@ -159,7 +159,8 @@ class Drivetrain:
         # rerun if drift
         if abs(angle - orientation.heading(DEGREES)) % 360 > 1:
             self.turn2(angle, speed=10)
-    def arc(self, rad, head, side, duration, speed=65):
+        print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
+    def arc(self, rad, head, side, duration, speed=65, finish=True):
         '''
         ### An arc function which allows us to skip parts in autons where we alternate between turn2's and drive4's.
 
@@ -191,6 +192,8 @@ class Drivetrain:
         # and away she goes!
         dt_right.spin(FORWARD, right*sconst*12/100, VOLT)
         dt_left.spin(FORWARD, left*sconst*12/100, VOLT)
+        if not finish:
+            return None
         # wait, then stop
         wait(duration, SECONDS)
         dt_left.stop()
@@ -199,20 +202,8 @@ class Drivetrain:
         '''
         # assuming arc is already set up
         # press B when arc should end
-        def arc_dur(self, rad, head, side, speed=65)
-            # convert sides to numbers
-            aside = 1 if side == RIGHT else -1
-            ahead = 1 if head == FORWARD else -1
-            # targets for each side
-            left = ahead*(rad+aside*self.wheelbase/2) # the parenthesized portion is the abs value
-            right = ahead*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
-            # velocities
-            sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
-            print('ARCTEST', rad, head, side, speed)
-            # and away she goes!
-            dt_right.spin(FORWARD, right*sconst*12/100, VOLT)
-            dt_left.spin(FORWARD, left*sconst*12/100, VOLT)
-            
+        def test(rad):
+            dt.arc(..., finish=False)
             initial_time = brain.timer.time(SECONDS)
             while not controller_1.buttonB.pressing():
                 wait(1, MSEC)
@@ -299,8 +290,8 @@ def autonomous():
             orientation.set_heading(270)
         initial_time = brain.timer.time(SECONDS)
         matchload_setup(mangle=mangle)
-        #while brain.timer.time(SECONDS)-initial_time < 27:
-        #    wait(50, MSEC)
+        while brain.timer.time(SECONDS)-initial_time < 27:
+            wait(50, MSEC)
         controller_1.rumble('_._._._._.')
         wait(3, SECONDS)
         cp.catapult(None)
@@ -313,7 +304,7 @@ def autonomous():
         dt.turn2(45)
         dt.drive4(21)
         dt.turn2(180)
-        dt.drive4(-33-24-3, timeout=3)#-6
+        dt.drive4(-33-24-3, timeout=3)
     def pushes(start=False):
         """
         NEW AUTON SKILLS, starting after match loading (26s)
@@ -324,42 +315,47 @@ def autonomous():
         """
         if start:
             orientation.set_heading(180, DEGREES)
+            dt.drive4(-3)
         # arc back for right side push
-        dt.arc(20, REVERSE, RIGHT, 1.5, speed=65)
+        dt.arc(20, REVERSE, RIGHT, 1.2, speed=65)
         dt.turn2(90)
         dt.drive4(5)
         # dive into the heart of the enemy - i mean offensive zone
         dt.turn2(0)
-        dt.drive4(-20)
+        dt.drive4(-10)
         dt.turn2(15)
-        dt.drive4(-22)
-        # side angle push 1
-        dt.turn2(158)
+        dt.drive4(-32)
+        # angle push 1
+        dt.turn2(155)
         dt.drive4(-24)
         # traverse to next push
         dt.drive4(7)
         dt.turn2(180)
         dt.drive4(15)
         dt.turn2(-90)
-        dt.drive4(42, timeout=3)
-        # side angle push 2
-        dt.turn2(180+37)
-        dt.drive4(-30)
-        dt.turn2(180+37)
+        dt.drive4(43, timeout=3)
+        # angle push 2
+        dt.turn2(33)
         dt.drive4(30)
-        # center push
-        dt.turn2(-90)
-        dt.drive4(-30)
-        cp.wings(OPEN)
+        dt.turn2(33)
+        # center push 1
+        dt.arc(9.5, REVERSE, RIGHT, 1.5)
         dt.turn2(180)
-        cp.wings(CLOSE)
-        dt.drive4(30, speed=200)
-        # and... repush
         cp.wings(OPEN)
-        dt.drive4(-31)
+        dt.drive4(-20)
         cp.wings(CLOSE)
-        dt.drive4(10, speed=200)
-        # TODO: insert side push here if time
+        # center push 2 at a slightly diff angle
+        dt.drive4(12, speed=200)
+        dt.turn2(160)
+        cp.wings(OPEN)
+        dt.drive4(-15)
+        dt.drive4(7, speed=200)
+        cp.wings(CLOSE)
+        # side push 2
+        dt.turn2(-87)
+        dt.drive4(55)
+        dt.turn2(-135)
+        dt.arc(22, REVERSE, LEFT, 1.5, speed=65) # reuse arc from first side push
 
     sequence = [matchload, traverse, pushes]
     test_sequence = [pushes]
@@ -373,7 +369,7 @@ def autonomous():
         first = False
     print(brain.timer.time(SECONDS))
     brain.screen.print(brain.timer.time(SECONDS))
-
-print("\033[2J") # clear console
+auton = autonomous
+#print("\033[2J") # clear console
 
 competition = Competition(driver_control, autonomous)
