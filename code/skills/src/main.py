@@ -48,7 +48,7 @@ endg = DigitalOut(brain.three_wire_port.b)
 
 class Components:
     def __init__(self, cata_speed):
-        catapult.set_velocity(cata_speed, PERCENT)
+        catapult.set_velocity(cata_speed, RPM)
         intake.set_velocity(200, PERCENT)
 
         self.wing_value = False
@@ -75,16 +75,18 @@ class Drivetrain:
         self.gear_ratio = gear_ratio
         self.wheel_diameter = wheel_diameter
         self.wheelbase = wheelbase
-    def drive4(self, inches, speed=100, timeout=1.5):
+        self.dt_time = 0
+    def drive4(self, inches, speed=200, timeout=1):
+        first = brain.timer.time(SECONDS)
         '''
-        ### I think this is the mosted using dt auton function; it simply drives a number of inches.
+        ### I think this is the most used dt auton function; it simply drives a number of inches.
         We are planning to eventually add a PID loop or something here later on.
         A custom timeout solution end the command and moves on if the robot gets stuck or takes too long.
 
         #### Arguments:
             inches: how far to drive, in inches forward. Negative values are accepted and interpreted as inches backwards.
             speed (>0, <100): speed of both sides, in percent
-            timeout (>0): DEPRECATED - do n
+            timeout (>0): DEPRECATED - do not use, full stop.
         #### Returns:
             None
         #### Examples:
@@ -106,21 +108,24 @@ class Drivetrain:
         # main timeout loop
         while running:
             wait(10, MSEC)
-            # TODO: make these checks more elegant
-            if abs(dt_left.velocity(PERCENT)) > 1:
+            # is_started makes sure we don't stop during accel
+            if dt_left.velocity(PERCENT) > 5:
                 is_started = True
-            is_not_moving = dt_left.is_done() or dt_left.velocity(PERCENT) == 0
-            timeouted = brain.timer.time(SECONDS)-initial_time >= timeout
-            if (timeouted or is_not_moving) and is_started:
-                wait(100, MSEC)
-                is_not_moving = dt_left.is_done() or dt_left.velocity(PERCENT) == 0
-                if is_not_moving:
-                    running = False
+            # main checks
+            # if brain.timer.time(SECONDS)-initial_time >= timeout:
+            #     print("drive4 timed out: dist", inches, "timeout", timeout)
+            #     running = False
+            if is_started and dt_left.velocity(PERCENT) == 0: # UTB elif
+                # recalculate as a form of error filtering
+                wait(40, MSEC)
+                running = not (dt_left.velocity(PERCENT) == 0)
+            
         # stop
         dt_left.stop()
         dt_right.stop()
         # logging
-        print("drive4/done", inches, "in, took", brain.timer.time(SECONDS)-initial_time, 'sec')
+        #print("drive4/done", inches, "in, took", brain.timer.time(SECONDS)-initial_time, 'sec')
+        self.dt_time += brain.timer.time(SECONDS)-first
     def turn2(self, angle_unmodded, speed=41):
         '''
         ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
@@ -159,7 +164,7 @@ class Drivetrain:
         # rerun if drift
         if abs(angle - orientation.heading(DEGREES)) % 360 > 1:
             self.turn2(angle, speed=10)
-        print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
+        #print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
     def arc(self, rad, head, side, duration, speed=65, finish=True):
         '''
         ### An arc function which allows us to skip parts in autons where we alternate between turn2's and drive4's.
@@ -193,6 +198,7 @@ class Drivetrain:
         dt_right.spin(FORWARD, right*sconst*12/100, VOLT)
         dt_left.spin(FORWARD, left*sconst*12/100, VOLT)
         if not finish:
+            print(left*sconst, right*sconst)
             return None
         # wait, then stop
         wait(duration, SECONDS)
@@ -200,8 +206,6 @@ class Drivetrain:
         dt_right.stop()
         # in case you need it - here's a simple fn to determine duration of an arc
         '''
-        # assuming arc is already set up
-        # press B when arc should end
         def test(rad):
             dt.arc(..., finish=False)
             initial_time = brain.timer.time(SECONDS)
@@ -214,7 +218,8 @@ class Drivetrain:
         
        
 dt = Drivetrain(60/36, 3.25, 11)
-cp = Components(80)
+# (4/5)(motor rpm) = matchloads per minutes
+cp = Components(165) # 144 triballs per minute, 2.4 per sec
 # helper functions
 def matchload_setup(mangle=20):
     dt.drive4(12)
@@ -288,15 +293,16 @@ def autonomous():
     def matchload(start=False):
         if start:
             orientation.set_heading(270)
-        initial_time = brain.timer.time(SECONDS)
         matchload_setup(mangle=mangle)
-        while brain.timer.time(SECONDS)-initial_time < 27:
+        loads = 45
+        load_const = (45/37)*(5/4) # multiply desired # of matchloads by (45/37)*(5/4) - 5/4 due to gear ratio, 45/37 for error correction?
+        catapult.spin_for(FORWARD, 45*load_const, TURNS, wait=False) 
+        while catapult.is_spinning():
+            if catapult.position(TURNS) > load_const*(loads-3):
+                intake.spin(FORWARD)
             wait(50, MSEC)
-        controller_1.rumble('_._._._._.')
-        wait(3, SECONDS)
-        cp.catapult(None)
-        print(orientation.heading(DEGREES))
     def traverse(start=False):
+        intake.stop()
         if start:
             orientation.set_heading(180-mangle)
         # switch to offensive zone
@@ -318,7 +324,9 @@ def autonomous():
             dt.drive4(-3)
         # arc back for right side push
         dt.arc(20, REVERSE, RIGHT, 1.2, speed=65)
-        dt.turn2(90)
+        dt.drive4(-10)
+        dt.drive4(5)
+        dt.drive4(-5)
         dt.drive4(5)
         # dive into the heart of the enemy - i mean offensive zone
         dt.turn2(0)
@@ -331,9 +339,9 @@ def autonomous():
         # traverse to next push
         dt.drive4(7)
         dt.turn2(180)
-        dt.drive4(15)
+        dt.drive4(12)
         dt.turn2(-90)
-        dt.drive4(43, timeout=3)
+        dt.drive4(46, timeout=3)
         # angle push 2
         dt.turn2(33)
         dt.drive4(30)
@@ -343,19 +351,23 @@ def autonomous():
         dt.turn2(180)
         cp.wings(OPEN)
         dt.drive4(-20)
+        dt.drive4(10)
+        dt.drive4(-18, speed=200)
         cp.wings(CLOSE)
         # center push 2 at a slightly diff angle
-        dt.drive4(12, speed=200)
+        dt.drive4(18, speed=200)
         dt.turn2(160)
         cp.wings(OPEN)
-        dt.drive4(-15)
+        dt.drive4(-26)
         dt.drive4(7, speed=200)
         cp.wings(CLOSE)
         # side push 2
-        dt.turn2(-87)
-        dt.drive4(55)
-        dt.turn2(-135)
-        dt.arc(22, REVERSE, LEFT, 1.5, speed=65) # reuse arc from first side push
+        dt.turn2(93)
+        dt.drive4(-12)
+        cp.wings(OPEN)
+        dt.arc(9, REVERSE, LEFT, 1.5, speed=65) # reuse arc from first side push
+        cp.wings(CLOSE)
+        dt.drive4(-5, speed=200)
 
     sequence = [matchload, traverse, pushes]
     test_sequence = [pushes]
@@ -369,7 +381,6 @@ def autonomous():
         first = False
     print(brain.timer.time(SECONDS))
     brain.screen.print(brain.timer.time(SECONDS))
-auton = autonomous
-#print("\033[2J") # clear console
 
+print("\033[2J") # clear console
 competition = Competition(driver_control, autonomous)
