@@ -112,14 +112,13 @@ class Drivetrain:
             if dt_left.velocity(PERCENT) > 5:
                 is_started = True
             # main checks
-            # if brain.timer.time(SECONDS)-initial_time >= timeout:
-            #     print("drive4 timed out: dist", inches, "timeout", timeout)
-            #     running = False
-            if is_started and dt_left.velocity(PERCENT) == 0: # UTB elif
+            if brain.timer.time(SECONDS)-initial_time >= timeout:
+                print("drive4 timed out: dist", inches, "timeout", timeout)
+                running = False
+            elif is_started and dt_left.velocity(PERCENT) == 0: # UTB if
                 # recalculate as a form of error filtering
                 wait(40, MSEC)
                 running = not (dt_left.velocity(PERCENT) == 0)
-            
         # stop
         dt_left.stop()
         dt_right.stop()
@@ -323,6 +322,12 @@ def autonomous():
             orientation.set_heading(180, DEGREES)
             dt.drive4(-3)
         # arc back for right side push
+        """
+        AUTON SKILLS, ICC official run: stops at the beginning of this fn
+        Possible options:
+            Not timeouting??? -> add back timeout clause in dt.drive4
+            Sequence is wrong??? -> fix it
+        """
         dt.arc(20, REVERSE, RIGHT, 1.2, speed=65)
         dt.drive4(-10)
         dt.drive4(5)
@@ -370,7 +375,7 @@ def autonomous():
         dt.drive4(-5, speed=200)
 
     sequence = [matchload, traverse, pushes]
-    test_sequence = [pushes]
+    # test_sequence = [pushes]
 
     dt_left.set_stopping(HOLD)
     dt_right.set_stopping(HOLD)
@@ -379,7 +384,7 @@ def autonomous():
     for s in sequence:
         s(first)
         first = False
-    print(brain.timer.time(SECONDS))
+    # print(brain.timer.time(SECONDS))
     brain.screen.print(brain.timer.time(SECONDS))
 
 print("\033[2J") # clear console
