@@ -7,10 +7,10 @@ import random
 brain = Brain()
 # controller
 controller_1 = Controller(PRIMARY)
-
+rm1 = Motor(Ports.PORT11, GearSetting.RATIO_6_1, True)
 # drivetrain
 dt_left = MotorGroup(
-    Motor(Ports.PORT11, GearSetting.RATIO_6_1, True),
+    rm1,
     Motor(Ports.PORT12, GearSetting.RATIO_6_1, True),
     Motor(Ports.PORT13, GearSetting.RATIO_6_1, True)
 )
@@ -102,45 +102,68 @@ class PID:
 
         return velocity
 
-def pid_turn(angle_unmodded, c=(2, 0.5, 0.2)):
+def pid_turn(angle_unmodded, c=(2, 0, 0), logs=False):
+    def sign(x):
+        if x > 0:
+            return 1
+        elif x < 0:
+            return -1
+        else:
+            return 0
     # error calc fn
     angle = angle_unmodded % 360
     def error_calc(d):
         abs_err = (angle-d)%360 # 0 to 360
-        norm_err = ((-abs_err % -180)+(180 if abs_err>180 else 0)) # -180 to 180
+        norm_err = ((-abs_err % -180)+(180 if abs_err>=180 else 0)) # -180 to 180
         return norm_err/180 # -1 to 1
     # basic vars
     wait_time = 0.01
     err = error_calc(orientation.heading(DEGREES))
+    min_volt = 3
+    max_volt = 12
     # set up controller
     control = PID(wait_time, err, c)
-
-    while abs(err) >= 0.01 or abs(dt_left.velocity(PERCENT)) >= 5:
+    # logs stuff
+    vels = []
+    itime = brain.timer.time(SECONDS)
+    while (abs(err) >= 0.01 or abs(dt_left.velocity(PERCENT)) >= 5) and brain.timer.time(SECONDS)-itime <= 5:
         # error
         err = error_calc(orientation.heading(DEGREES))
-        vel = control.update(err)
+        vel = control.update(err)*100
+        current_vel = -dt_left.velocity(PERCENT)
+        target = current_vel+0.1*(vel-current_vel)
+        volt = target*12/100
+        if volt < -max_volt: volt = -max_volt
+        if volt > max_volt: volt = max_volt
+
+        if volt < min_volt and volt > 0: volt = min_volt
+        if volt > -1 * min_volt and volt < 0: volt = -1 * min_volt
         # spin ahoy!
-        dt_left.spin(REVERSE, vel*50, PERCENT)
-        dt_right.spin(FORWARD, vel*50, PERCENT)
+        dt_left.spin(REVERSE, volt, VOLT)
+        dt_right.spin(FORWARD, volt, VOLT)
+        # vels
+        vels.append((target, -dt_left.velocity(PERCENT)))
+
         # 10 msec wait
         wait(wait_time*1000, MSEC)
     dt_left.stop()
     dt_right.stop()
+    if logs:
+        print('\n'.join([' '.join([str(j) for j in i]) for i in vels]))
 
-def ttest(consts):
+def t(*consts, a=90, log=False):
     orientation.set_heading(0, DEGREES)
     brain.timer.clear()
-    pid_turn(90, c=consts)
-    print(brain.timer.time(MSEC), orientation.heading(DEGREES))
-#test_turn(dt.old_turn2)
-"""
-Set I and D to 0. Increase P until you get oscillation off the system. Then cut P in half (p = 1.8 -> 0.9)
+    pid_turn(a, c=consts, logs=log)
+    if not log:
+        print(brain.timer.time(MSEC), orientation.heading(DEGREES))
 
-increase I until you are returning to the set-point quick enough for your application. Too much integral gain can cause a lot of overshoot.
-
-increase D until you’ve started to dampen your response as you approach the set point.
-""" 
+def t_comp(*consts):
+    def pid_wrapper(a):
+        pid_turn(a, c=consts)
+    test_turn(pid_wrapper)
 """
 old turn2: 0.695, 0.625, 0.83, 0.84, 0.75, 0.84, 0.89, 0.705, 0.875, 0.89, 1.0, 0.98, 1.045, 1.125, 1.045, 1.13, 0.71, 0.756
 pid turn2:
 """
+# testing: t(2, 0.3, 0.7, a=180)
