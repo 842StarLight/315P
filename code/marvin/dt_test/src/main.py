@@ -67,3 +67,34 @@ def logger():
 # run loop
 print("\033[2J")
 logger()
+# other code housed here
+
+# testing class for turn functions originally made for turnpid
+"""
+class TurnTest: # comprehensive class in which we can write code to test a variety of turn functions
+    def __init__(self, fn_wrapper):
+        # fn_wrapper - a function instance which takes in an angle then turns to it
+        self.fn = fn_wrapper
+    def comprehensive(self, to=180):
+        times = []
+        for degrees in range(10, to+1, 10):
+            wait(2, SECONDS)
+
+            orientation.set_heading(0, DEGREES)
+
+            brain.timer.clear()
+            self.fn(degrees)
+            times.append(brain.timer.time(SECONDS)/2)
+            brain.timer.clear()
+            self.fn(0)
+            times[-1] += brain.timer.time(SECONDS)/2
+
+        print(', '.join([str(round(i,3)) for i in times]))
+    def single(self, a=90):
+        orientation.set_heading(0, DEGREES)
+        brain.timer.clear()
+        self.fn(a)
+        print(brain.timer.time(MSEC))
+        wait(0.5, SECONDS)
+        print(orientation.heading(DEGREES))
+"""

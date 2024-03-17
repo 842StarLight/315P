@@ -18,9 +18,12 @@ while orientation.is_calibrating():
 # drivetrain
 dt_right = MotorGroup(Motor(Ports.PORT1, GearSetting.RATIO_18_1, True))
 dt_left = MotorGroup(Motor(Ports.PORT4, GearSetting.RATIO_18_1, False))
-drive = SmartDrive(dt_left, dt_right, orientation)
 dt_left.set_stopping(BRAKE) 
 dt_right.set_stopping(BRAKE)
+
+# START NEW CODE HERE
+
+# the core feedback loop; a reusable controller that we use in two of our crucial architectural functions
 class PID:
     def __init__(self, sample_rate, initial_error, consts): # sample_rate in seconds
         self.sample_rate = sample_rate
@@ -47,7 +50,15 @@ class PID:
         velocity = proportional + integral + derivative
 
         return velocity
-
+# voltage utility 
+def clamp_volt(volt):
+    if volt > 0:
+        volt = min(12, volt)
+        volt = max(3, volt)
+    elif volt < 0:
+        volt = max(-12, volt)
+        volt = min(-3, volt)
+    return volt
 class Drivetrain:
     def __init__(self, gear_ratio, wheel_diameter, wheelbase):
         self.gear_ratio = gear_ratio
@@ -98,9 +109,49 @@ class Drivetrain:
                 wait(40, MSEC)
                 running = not (dt_left.velocity(PERCENT) == 0)
         # stop
-        drive.stop()
+        dt_left.stop()
+        dt_right.stop()
         # logging
-    def turn2(self, angle_unmodded, speed=41):
+    def turn2(angle_unmodded, c=(3, 0, 0.2), speed=100, timeout=2):
+        '''
+        ### A turn-to-heading function which uses a PD feedback loop (can easily be modified for PID) in tandem with the IMU to achieve very precise results.
+
+        #### Arguments:
+            angle_unmodded: angle turning to, in degrees clockwise. Negative inputs are allowed and will be interpreted as degrees counterclockwise. Reference point is set during calibration
+            speed (>0, <100): absolute speeds of both sides, in percent (100 works, and there's no reason to change it)
+            timeout (>0): DEPRECATED - do not use, full stop. At some point in the future, let's test then finalize this function with this input removed
+        #### Returns:
+            None
+        #### Examples:
+            # draws a square
+            for i in range(4):
+                dt.turn2(i*90)
+                dt.drive4(10)
+        '''
+        # error calc fn
+        angle = angle_unmodded % 360
+        def error_calc(d):
+            abs_err = (angle - d) % 360 # 0 to 360
+            norm_err = (-abs_err % -180)+(180 if abs_err>=180 else 0) # -180 to 180
+            return norm_err/180 # -1 to 1
+        # basic vars & controller setup
+        wait_time = 0.01
+        err = error_calc(orientation.heading(DEGREES))
+        control = PID(wait_time, err, c)
+        initial_time = brain.timer.time(SECONDS)
+        while (abs(err) >= 0.01 or abs(dt_left.velocity(PERCENT)) >= 5) and brain.timer.time(SECONDS)-initial_time <= timeout:
+            # speed calcs
+            err = error_calc(orientation.heading(DEGREES))
+            target = control.update(err)*speed
+            volt = clamp_volt(target*12/100)
+            # spin ahoy!
+            dt_left.spin(REVERSE, volt, VoltageUnits.VOLT) # type: ignore
+            dt_right.spin(FORWARD, volt, VoltageUnits.VOLT) # type: ignore
+            # 10 msec wait
+            wait(wait_time*1000, MSEC)
+        dt_left.stop()
+        dt_right.stop()
+    def old_turn2(self, angle_unmodded, speed=41):
         '''
         ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
 
@@ -191,15 +242,8 @@ class Drivetrain:
         '''     
 dt = Drivetrain(1, 4, 11)
 
-# voltage utility
-def clamp_volt(volt):
-    if volt > 0:
-        volt = min(12, volt)
-        volt = max(3, volt)
-    elif volt < 0:
-        volt = max(-12, volt)
-        volt = min(-3, volt)
-    return volt
+# END NEW CODE HERE
+
 # driver control
 def driver_control(time=10**10):
     # EXTREMELY dumbed-down
@@ -215,68 +259,10 @@ def driver_control(time=10**10):
         dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VoltageUnits.VOLT) # type: ignore
     dt_left.stop()
     dt_right.stop()
-# pid turn function
-def pid_turn(angle_unmodded, c=(2, 0, 0), logs=False):
-    # error calc fn
-    angle = angle_unmodded % 360
-    def error_calc(d):
-        abs_err = (angle-d)%360 # 0 to 360
-        norm_err = ((-abs_err % -180)+(180 if abs_err>=180 else 0)) # -180 to 180
-        return norm_err/180 # -1 to 1
-    # basic vars & controller setup
-    wait_time = 0.01
-    err = error_calc(orientation.heading(DEGREES))
-    control = PID(wait_time, err, c)
-    # logs stuff
-    vels = []
-    itime = brain.timer.time(SECONDS)
-    while (abs(err) >= 0.01 or abs(dt_left.velocity(PERCENT)) >= 5) and brain.timer.time(SECONDS)-itime <= 5:
-        # speed calcs
-        err = error_calc(orientation.heading(DEGREES))
-        target = control.update(err)*100
-        volt = clamp_volt(target*12/100)
-        # spin ahoy!
-        dt_left.spin(REVERSE, volt, VoltageUnits.VOLT) # type: ignore
-        dt_right.spin(FORWARD, volt, VoltageUnits.VOLT) # type: ignore
-        # vels
-        vels.append((target, -dt_left.velocity(PERCENT) ))
-        # 10 msec wait
-        wait(wait_time*1000, MSEC)
-    dt_left.stop()
-    dt_right.stop()
-    if logs:
-        print('\n'.join([' '.join([str(j) for j in i]) for i in vels]))
-class TurnTest: # comprehensive class in which we can write code to test a variety of turn functions
-    def __init__(self, fn_wrapper):
-        # fn_wrapper - a function instance which takes in an angle then turns to it
-        self.fn = fn_wrapper
-    def comprehensive(self, to=180):
-        times = []
-        for degrees in range(10, to+1, 10):
-            wait(2, SECONDS)
-
-            orientation.set_heading(0, DEGREES)
-
-            brain.timer.clear()
-            self.fn(degrees)
-            times.append(brain.timer.time(SECONDS)/2)
-            brain.timer.clear()
-            self.fn(0)
-            times[-1] += brain.timer.time(SECONDS)/2
-
-        print(', '.join([str(round(i,3)) for i in times]))
-    def single(self, a=90):
-        orientation.set_heading(0, DEGREES)
-        brain.timer.clear()
-        self.fn(a)
-        print(brain.timer.time(MSEC))
-        wait(0.5, SECONDS)
-        print(orientation.heading(DEGREES))
-def turn_wrap(*consts, log=False):
-    def wrapper(a):
-        pid_turn(a, c=consts, logs=log)
-    return TurnTest(wrapper)
-# pid drive
+# CURRENT EXPERIMENT - pid_drive
+# - go-to: drive_wrap(2, .5, .5, log=True).single()
+# - figure it the hell out! by starting from scratch
+# - are currently using PERCENT instead of VOLT to avoid jittering
 def pid_drive(inches, c=(2, 0, 0), speed=100, timeout=5, log=False):
     # reset
     dt_left.reset_position()
@@ -342,18 +328,13 @@ def drive_wrap(*consts, log=False, speed=100):
         pid_drive(dist, c=consts, speed=speed, log=log)
     return DriveTest(wrapper)
 
-"""
-EXPERIMENTS:
-drive4: switch to PID
- - go-to: drive_wrap(2, .5, .5, log=True).single()
- - figure it the hell out!
-FINAL turn2: switch to PD
- - constants kP = 3, kI = 0, kD = 0.2 go-to: turn_wrap(2, 0.5, 0.5).single()
- - test results below
- - integrate back into drivetrain class and put testing code into separate file
-"""
-"""
-Test results (angles from 10 to 180, incrementing by 10; average of two turns to get time per angle) (pid constants 3, 0, 0.2)
-turn_pid: 0.28, 0.46, 0.47, 0.5, 0.59, 0.58, 0.54, 0.515, 0.565, 0.565, 0.57, 0.64, 0.61, 0.67, 1.221, 0.73, 0.95, 0.805
-dt.turn2: 0.545, 0.56, 0.6, 0.695, 0.74, 0.985, 1.065, 1.205, 1.165, 1.235, 1.23, 1.271, 1.335, 1.375, 1.39, 1.415, 1.465, 1.66
-"""
+# hello sunday aadish! here's your agenda:
+# 1. Finalize & simplify PID (done by sunday aadish :)
+# 2. Vision sensor + distance sensor demo
+#   a. Turn until sees triball, then drive until 1 in away from it
+#   b. Objective: get used to coding vision & distance sensor
+# 3. PID drive4
+#   c. MAKE IT WORK
+#   d. Objective: add a feedback loop based on encoder data and a PID controller to make driving much more accurate
+#   e. Replace encoder raw with distance raw
+#   f. Objective: use the current PID loop and constants, and simply modofiy the error function with knowledge of the distance sensor 

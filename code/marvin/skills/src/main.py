@@ -11,14 +11,14 @@ brain = Brain()
 # controller
 controller_1 = Controller(PRIMARY)
 # logging explanation
-controller_1.screen.set_cursor(1, 1)
-controller_1.screen.print("time")
+brain.screen.set_cursor(1, 1)
+brain.screen.print("time")
 
-controller_1.screen.set_cursor(2, 1)
-controller_1.screen.print("dt temps")
+brain.screen.set_cursor(2, 1)
+brain.screen.print("dt temps")
 
-controller_1.screen.set_cursor(3, 1)
-controller_1.screen.print("cata temp")
+brain.screen.set_cursor(3, 1)
+brain.screen.print("cata temp")
 # sensors
 dist = Distance(Ports.PORT2)
 
@@ -232,10 +232,10 @@ def matchload_setup(mangle=20):
 def driver_control():
     # core archie setup
     def print_all(msg):
-        controller_1.screen.clear_screen()
+        brain.screen.clear_screen()
         for i in range(3):
-            controller_1.screen.set_cursor(i+1,1)
-            controller_1.screen.print(msg)
+            brain.screen.set_cursor(i+1,1)
+            brain.screen.print(msg)
     log_n = 0 # a var to keep track of segregated logging
     brain.timer.clear()
     # skills mode + matchloading setup
@@ -243,12 +243,11 @@ def driver_control():
     skills = False
     if controller_1.buttonY.pressing() or controller_1.buttonA.pressing():
         skills = True
-        controller_1.rumble('-.-.-.')
         print_all('SKILLS MODE')
         orientation.set_heading(270, DEGREES)
         matchload_setup()
     # cp controls
-    controller_1.screen.clear_screen()
+    brain.screen.clear_screen()
     controller_1.buttonL2.pressed(cp.wings)
     controller_1.buttonR2.pressed(cp.wings)
 
@@ -276,8 +275,8 @@ def driver_control():
             "dt: %d %d" % (dt_left.temperature(PERCENT), dt_right.temperature(PERCENT)),
             "cata: %d" % catapult.temperature(PERCENT),
         ]
-        controller_1.screen.set_cursor(1 + log_n % 3, 1)
-        controller_1.screen.print(logs[log_n % 3])
+        brain.screen.set_cursor(1 + log_n % 3, 1)
+        brain.screen.print(logs[log_n % 3])
         log_n += 1
         # hang mode
         if brain.timer.time(SECONDS) > 50 and skills and hang_n > 0:
@@ -286,7 +285,7 @@ def driver_control():
             print_all('HANG MODE')
             hang_n -= 1
             if hang_n == 0:
-                controller_1.screen.clear_screen()
+                brain.screen.clear_screen()
 def autonomous():
     mangle = 20
     def matchload(start=False):
