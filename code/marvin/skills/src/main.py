@@ -1,5 +1,4 @@
 from vex import *
-import urandom
 import time
 import math
 import random
