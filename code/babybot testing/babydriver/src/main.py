@@ -249,9 +249,6 @@ def driver_control(time=10**10):
 
 
 # hello monday aadish! here's your agenda:
-# go-to: rapt(0.5, 0, 0)
-#   e. Replace encoder raw with distance raw
-#   f. Objective: use the current PID loop and constants, and simply modofiy the error function with knowledge of the distance sensor 
-# 3. Vision sensor + distance sensor demo
-#   a. Turn until sees triball, then drive until 1 in away from it
+# Vision sensor + distance sensor demo
+#   a. Go to triball and print its color
 #   b. Objective: get used to coding vision & distance sensor
