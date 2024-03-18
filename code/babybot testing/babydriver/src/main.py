@@ -252,3 +252,6 @@ def driver_control(time=10**10):
 # Vision sensor + distance sensor demo
 #   a. Go to triball and print its color
 #   b. Objective: get used to coding vision & distance sensor
+# Project 9
+#   c. Try rewriting drivetrain architecture to inherit SmartDrive
+#   d. Simplify, simplify, simplify code
