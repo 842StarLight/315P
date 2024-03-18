@@ -98,3 +98,20 @@ class TurnTest: # comprehensive class in which we can write code to test a varie
         wait(0.5, SECONDS)
         print(orientation.heading(DEGREES))
 """
+# testing class for drive4 functions originally made for pid_drive_distance/pid_drive_encoder
+"""
+class DriveTest: # comprehensive class in which we can write code to test a variety of drive functions
+    def __init__(self, fn_wrapper):
+        # fn_wrapper - a function instance which takes in an distance then drives to it
+        self.fn = fn_wrapper
+    # def comprehensive(self): - how would we implement this?
+    def single(self, dist=24):
+        orientation.set_heading(0, DEGREES)
+        brain.timer.clear()
+        self.fn(dist)
+        print(brain.timer.time(MSEC))
+def rapt(*consts, log=False, speed=100, timeout=2):
+    def wrapper(dist):
+        pid_drive(dist, c=consts, speed=speed, log=log, timeout=timeout)
+    DriveTest(wrapper).single()
+"""
