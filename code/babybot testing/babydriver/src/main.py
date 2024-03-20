@@ -14,15 +14,15 @@ orientation = Inertial(Ports.PORT10)
 orientation.calibrate()
 while orientation.is_calibrating():
     wait(10, MSEC)
-# left wrapper
 # drivetrain
 dt_left = MotorGroup(Motor(Ports.PORT2, GearSetting.RATIO_18_1, False))
 dt_right = MotorGroup(Motor(Ports.PORT1, GearSetting.RATIO_18_1, True))
 
 dt_left.set_stopping(BRAKE) 
 dt_right.set_stopping(BRAKE)
-# distance sensor
+# distance
 distance = Distance(Ports.PORT6)
+
 # START NEW CODE HERE
 
 # the core feedback loop; a reusable controller that we use in two of our crucial architectural functions
@@ -75,12 +75,13 @@ class Drivetrain:
         # error calc
         initial_dist = distance.object_distance(INCHES)
         def error_calc(raw_dist):
-            return (inches - (raw_dist-initial_dist))/inches
+            return (inches - (raw_dist-initial_dist))/abs(inches)
         # set up error & controllers
         wait_time = 0.01
         err = error_calc(initial_dist)
         control = PID(wait_time, err, c)
         while abs(err) >= 0.01 and brain.timer.time(SECONDS)-initial_time <= timeout:
+            print(err)
             err = error_calc(distance.object_distance(INCHES))
             target = control.update(err) * speed
             # spin ahoy!
@@ -246,12 +247,40 @@ def driver_control(time=10**10):
         dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VoltageUnits.VOLT) # type: ignore
     dt_left.stop()
     dt_right.stop()
+# vision stuff
+class VisionPro:
+    def __init__(self):
+        self.signatures = { # detect triballs
+            'GREEN': Signature(1, -6453, -5851, -6152, -6189, -5443, -5816, 6.300, 0),
+            'RED': Signature(2, 10417, 11277, 10847, -1703, -981, -1342, 11.000, 0),
+            'BLUE': Signature(3, -4533, -3863, -4198, 10449, 11739, 11094, 9.900, 0)
+        }
+        self.colors = {
+            'GREEN': Color.GREEN,
+            'BLUE': Color.BLUE,
+            'RED': Color.RED
+        }
+        self.index_lookup = {'GREEN': 1, 'RED': 2, 'BLUE': 3}
+        brightness = 71
+        self.sensor = Vision(Ports.PORT16, brightness, *list(self.signatures.values())) # resolution 316 horizontal, 212 vertical
+    def is_detecting_triball(self, color):
+        shot = self.sensor.take_snapshot(self.index_lookup[color], 1)
+        if shot == None:
+            return -1
+        width = shot[0].width
+        dist = (1/math.tan(30.5*math.pi/180))*(3*316)/(2*width)
+        return dist
+reality = VisionPro() # definitely not a joke ;)
 
-
-# hello monday aadish! here's your agenda:
-# Vision sensor + distance sensor demo
-#   a. Go to triball and print its color
-#   b. Objective: get used to coding vision & distance sensor
-# Project 9
-#   c. Try rewriting drivetrain architecture to inherit SmartDrive
-#   d. Simplify, simplify, simplify code
+while True:
+    print(distance.object_distance(INCHES), reality.is_detecting_triball('GREEN')*1.7)
+"""
+vision::signature TRIBALL_GREEN (1, -6453, -5851, -6152, -6189, -5443, -5816, 6.300, 0);
+vision::signature TRIBALL_RED (2, 10417, 11277, 10847, -1703, -981, -1342, 11.000, 0);
+vision::signature TRIBALL_BLUE (3, -4533, -3863, -4198, 10449, 11739, 11094, 9.900, 0);
+vision::signature KAIRA (4, 0, 0, 0, 0, 0, 0, 3.000, 0);
+vision::signature SIG_5 (5, 0, 0, 0, 0, 0, 0, 2.500, 0);
+vision::signature SIG_6 (6, 0, 0, 0, 0, 0, 0, 2.500, 0);
+vision::signature SIG_7 (7, 0, 0, 0, 0, 0, 0, 2.500, 0);
+vex::vision vision1 ( vex::PORT1, 71, TRIBALL_GREEN, TRIBALL_RED, TRIBALL_BLUE, KAIRA, SIG_5, SIG_6, SIG_7 );
+"""

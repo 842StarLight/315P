@@ -10,16 +10,20 @@ brain = Brain()
 # controller
 controller_1 = Controller(PRIMARY)
 # logging explanation
-brain.screen.set_cursor(1, 1)
-brain.screen.print("time")
+def brain_setup():
+    brain.screen.set_font(FontType.PROP60)
 
-brain.screen.set_cursor(2, 1)
-brain.screen.print("dt temps")
+    brain.screen.set_cursor(1, 1)
+    brain.screen.print("time")
 
-brain.screen.set_cursor(3, 1)
-brain.screen.print("cata temp")
+    brain.screen.set_cursor(2, 1)
+    brain.screen.print("dt temps")
+
+    brain.screen.set_cursor(3, 1)
+    brain.screen.print("cata temp")
+brain_setup()
 # sensors
-dist = Distance(Ports.PORT2)
+distance = Distance(Ports.PORT2)
 
 orientation = Inertial(Ports.PORT1)
 orientation.calibrate()
@@ -44,39 +48,74 @@ catapult = Motor(Ports.PORT9, GearSetting.RATIO_18_1, False)
 # solenoids
 wings = DigitalOut(brain.three_wire_port.a)
 endg = DigitalOut(brain.three_wire_port.b)
+# voltage utility 
+def clamp_volt(volt):
+    if volt > 0:
+        volt = min(12, volt)
+        volt = max(3, volt)
+    elif volt < 0:
+        volt = max(-12, volt)
+        volt = min(-3, volt)
+    return volt
+# the core feedback loop; a reusable controller that we use in two of our crucial architectural functions
+class PID:
+    def __init__(self, sample_rate, initial_error, consts): # sample_rate in seconds
+        self.sample_rate = sample_rate
+        self.kP = consts[0]
+        self.kI = consts[1]
+        self.kD = consts[2]
 
-class Components:
-    def __init__(self, cata_speed):
-        catapult.set_velocity(cata_speed, RPM)
-        intake.set_velocity(200, PERCENT)
+        self.integral = 0.0  # Initialize integral for error accumulation
+        self.prev_error = initial_error  # Initialize previous error for derivative calculation
 
-        self.wing_value = False
-        self.intake_value = None
-    def intake(self, direction):
-        if direction == None:
-            intake.stop()
-        else:
-            intake.spin(direction)
-        self.intake_value = direction
-    def catapult(self, direction=FORWARD):
-        if direction == None:
-            catapult.stop()
-        else:
-            catapult.spin(direction)
-    def wings(self, value=None):
-        if value == None:
-            self.wing_value = not self.wing_value
-        else:
-            self.wing_value = value
-        wings.set(self.wing_value)
+    def update(self, error):
+        # Proportional term
+        proportional = self.kP * error
+
+        # Integral term
+        self.integral += error*self.sample_rate  # Accumulate error over time
+        integral = self.kI * self.integral
+
+        # Derivative term
+        derivative = self.kD * (error - self.prev_error) / self.sample_rate
+        self.prev_error = error  # Update previous error for next calculation
+
+        # Calculate intended velocity
+        velocity = proportional + integral + derivative
+
+        return velocity
+# the drivetrain class is completely custom, designed for simplicity, speed, & accuracy
 class Drivetrain:
     def __init__(self, gear_ratio, wheel_diameter, wheelbase):
         self.gear_ratio = gear_ratio
         self.wheel_diameter = wheel_diameter
         self.wheelbase = wheelbase
-        self.dt_time = 0
+    def pid_drive_distance(self, inches, c=(3, 0, 0.2), speed=100, timeout=2):
+        "PD controller that utilizes the distance sensor to have accurate drives."
+        # reset
+        dt_left.reset_position()
+        dt_right.reset_position()
+        initial_time = brain.timer.time(SECONDS)
+        # error calc
+        initial_dist = distance.object_distance(INCHES)
+        def error_calc(raw_dist):
+            return (inches - (raw_dist-initial_dist))/abs(inches)
+        # set up error & controllers
+        wait_time = 0.01
+        err = error_calc(initial_dist)
+        control = PID(wait_time, err, c)
+        while abs(err) >= 0.01 and brain.timer.time(SECONDS)-initial_time <= timeout:
+            print(err)
+            err = error_calc(distance.object_distance(INCHES))
+            target = control.update(err) * speed
+            # spin ahoy!
+            dt_left.spin(FORWARD, target, PERCENT)
+            dt_right.spin(FORWARD, target, PERCENT)
+            # 10 msec wait
+            wait(wait_time*1000, MSEC)
+        dt_left.stop()
+        dt_right.stop()
     def drive4(self, inches, speed=200, timeout=1):
-        first = brain.timer.time(SECONDS)
         '''
         ### I think this is the most used dt auton function; it simply drives a number of inches.
         We are planning to eventually add a PID loop or something here later on.
@@ -97,34 +136,73 @@ class Drivetrain:
         # speeds
         dt_left.set_velocity(speed, PERCENT)
         dt_right.set_velocity(speed, PERCENT)
+        # consts
+        dt_const = self.gear_ratio/(math.pi*self.wheel_diameter)
+        #12.5in per revolution
+        turns = dt_const * inches
         # core spin
-        dt_left.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
-        dt_right.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
+        dt_left.spin_for(FORWARD, dt_const*inches, TURNS, wait=False)
+        dt_right.spin_for(FORWARD, dt_const*inches, TURNS, wait=False)
         # record initial time; var to check if dt has accelerated
         initial_time = brain.timer.time(SECONDS)
-        is_started = False
         running = True
-        # main timeout loop
+        # wait until started
+        while dt_left.velocity(PERCENT) <= 5:
+            wait(10, MSEC)
+        # factor = 1.315556
+        # main loop
         while running:
             wait(10, MSEC)
-            # is_started makes sure we don't stop during accel
-            if dt_left.velocity(PERCENT) > 5:
-                is_started = True
-            # main checks
-            if brain.timer.time(SECONDS)-initial_time >= timeout:
-                print("drive4 timed out: dist", inches, "timeout", timeout)
+            if brain.timer.time(SECONDS) - initial_time > timeout:
                 running = False
-            elif is_started and dt_left.velocity(PERCENT) == 0: # UTB if
+            elif dt_right.velocity(PERCENT) == 0:
                 # recalculate as a form of error filtering
                 wait(40, MSEC)
                 running = not (dt_left.velocity(PERCENT) == 0)
-        # stop
+        # stop  
         dt_left.stop()
         dt_right.stop()
         # logging
-        #print("drive4/done", inches, "in, took", brain.timer.time(SECONDS)-initial_time, 'sec')
-        self.dt_time += brain.timer.time(SECONDS)-first
-    def turn2(self, angle_unmodded, speed=41):
+    def turn2(self, angle_unmodded, c=(3, 0, 0.2), speed=100, timeout=2):
+        '''
+        ### A turn-to-heading function which uses a PD feedback loop (can easily be modified for PID) in tandem with the IMU to achieve very precise results.
+
+        #### Arguments:
+            angle_unmodded: angle turning to, in degrees clockwise. Negative inputs are allowed and will be interpreted as degrees counterclockwise. Reference point is set during calibration
+            speed (>0, <100): absolute speeds of both sides, in percent (100 works, and there's no reason to change it)
+            timeout (>0): DEPRECATED - do not use, full stop. At some point in the future, let's test then finalize this function with this input removed
+        #### Returns:
+            None
+        #### Examples:
+            # draws a square
+            for i in range(4):
+                dt.turn2(i*90)
+                dt.drive4(10)
+        '''
+        # error calc fn
+        angle = angle_unmodded % 360
+        def error_calc(d):
+            abs_err = (angle - d) % 360 # 0 to 360
+            norm_err = (-abs_err % -180)+(180 if abs_err>=180 else 0) # -180 to 180
+            return norm_err/180 # -1 to 1
+        # basic vars & controller setup
+        wait_time = 0.01
+        err = error_calc(orientation.heading(DEGREES))
+        control = PID(wait_time, err, c)
+        initial_time = brain.timer.time(SECONDS)
+        while abs(err)*180 >= 0.5 and brain.timer.time(SECONDS)-initial_time <= timeout:
+            # speed calcs
+            err = error_calc(orientation.heading(DEGREES))
+            target = control.update(err)*speed
+            volt = target*12/100
+            # spin ahoy!
+            dt_left.spin(REVERSE, volt, VoltageUnits.VOLT) # type: ignore
+            dt_right.spin(FORWARD, volt, VoltageUnits.VOLT) # type: ignore
+            # 10 msec wait
+            wait(wait_time*1000, MSEC)
+        dt_left.stop()
+        dt_right.stop()
+    def old_turn2(self, angle_unmodded, speed=41):
         '''
         ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
 
@@ -163,7 +241,7 @@ class Drivetrain:
         if abs(angle - orientation.heading(DEGREES)) % 360 > 1:
             self.turn2(angle, speed=10)
         #print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
-    def arc(self, rad, head, side, duration, speed=65, finish=True):
+    def arc(self, rad, head, side, duration, speed=40, finish=True):
         '''
         ### An arc function which allows us to skip parts in autons where we alternate between turn2's and drive4's.
 
@@ -193,8 +271,8 @@ class Drivetrain:
         sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
         print('fastarc', rad, head, side, duration, speed)
         # and away she goes!
-        dt_right.spin(FORWARD, right*sconst*12/100, VOLT)
-        dt_left.spin(FORWARD, left*sconst*12/100, VOLT)
+        dt_right.spin(FORWARD, right*sconst*12/100, VoltageUnits.VOLT) # type: ignore
+        dt_left.spin(FORWARD, left*sconst*12/100, VoltageUnits.VOLT) # type: ignore
         if not finish:
             print(left*sconst, right*sconst)
             return None
@@ -212,12 +290,35 @@ class Drivetrain:
             dt_left.stop()
             dt_right.stop()
             print(brain.timer.time(SECONDS)-initial_time)
-        '''
-        
-       
-dt = Drivetrain(60/36, 3.25, 11)
-# (4/5)(motor rpm) = matchloads per minutes
-cp = Components(165) # 144 triballs per minute, 2.4 per sec
+        '''  
+# components class that wraps all of the non-drivetrain functions into one simple namespace
+class Components:
+    def __init__(self, cata_speed):
+        catapult.set_velocity(cata_speed, RPM)
+        intake.set_velocity(200, PERCENT)
+
+        self.wing_value = False
+        self.intake_value = None
+    def intake(self, direction):
+        if direction == None:
+            intake.stop()
+        else:
+            intake.spin(direction)
+        self.intake_value = direction
+    def catapult(self, direction=FORWARD):
+        if direction == None:
+            catapult.stop()
+        else:
+            catapult.spin(direction)
+    def wings(self, value=None):
+        if value == None:
+            self.wing_value = not self.wing_value
+        else:
+            self.wing_value = value
+        wings.set(self.wing_value)       
+# declare classes       
+dt = Drivetrain(48/36, 3.25, 11)
+cp = Components(165) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes
 # helper functions
 def matchload_setup(mangle=20):
     dt.drive4(12)
@@ -266,12 +367,12 @@ def driver_control():
         turn_speed = 0.5*controller_1.axis1.position()
         l = straight_speed + turn_speed
         r = straight_speed - turn_speed
-        dt_left.spin((FORWARD if l >= 0 else REVERSE), abs(l)*12/100, VOLT)
-        dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VOLT)
+        dt_left.spin((FORWARD if l >= 0 else REVERSE), abs(l)*12/100, VOLT) # type: ignore
+        dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VOLT) # type: ignore # type: ignore
         # logging
         logs = [
             "time: %d:%g" % (math.floor(brain.timer.time(SECONDS)/60), int(brain.timer.time(SECONDS) % 60)),
-            "dt: %d %d" % (dt_left.temperature(PERCENT), dt_right.temperature(PERCENT)),
+            "dt: %d %d" % (dt_left.temperature(PERCENT), dt_right.temperature(PERCENT)), # type: ignore
             "cata: %d" % catapult.temperature(PERCENT),
         ]
         brain.screen.set_cursor(1 + log_n % 3, 1)
@@ -308,6 +409,7 @@ def autonomous():
         dt.drive4(21)
         dt.turn2(180)
         dt.drive4(-33-24-3, timeout=3)
+        dt.turn2(180)
     def pushes(start=False):
         """
         NEW AUTON SKILLS, starting after match loading (26s)
@@ -320,13 +422,8 @@ def autonomous():
             orientation.set_heading(180, DEGREES)
             dt.drive4(-3)
         # arc back for right side push
-        """
-        AUTON SKILLS, ICC official run: stops at the beginning of this fn
-        Possible options:
-            Not timeouting??? -> add back timeout clause in dt.drive4
-            Sequence is wrong??? -> fix it
-        """
-        dt.arc(20, REVERSE, RIGHT, 1.2, speed=65)
+        dt.arc(20, REVERSE, RIGHT, 1.5)
+        dt.turn2(90)
         dt.drive4(-10)
         dt.drive4(5)
         dt.drive4(-5)
@@ -368,7 +465,7 @@ def autonomous():
         dt.turn2(93)
         dt.drive4(-12)
         cp.wings(OPEN)
-        dt.arc(9, REVERSE, LEFT, 1.5, speed=65) # reuse arc from first side push
+        dt.arc(9, REVERSE, LEFT, 1.5) # reuse arc from first side push
         cp.wings(CLOSE)
         dt.drive4(-5, speed=200)
 
@@ -384,6 +481,10 @@ def autonomous():
         first = False
     # print(brain.timer.time(SECONDS))
     brain.screen.print(brain.timer.time(SECONDS))
-
-print("\033[2J") # clear console
-competition = Competition(driver_control, autonomous)
+brain.timer.clear()
+dt.turn2(180)
+print(brain.timer.time(MSEC))
+wait(0.5, SECONDS)
+print(orientation.heading(DEGREES))
+#print("\033[2J") # clear console
+#competition = Competition(driver_control, autonomous) 
