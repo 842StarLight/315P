@@ -247,40 +247,97 @@ def driver_control(time=10**10):
         dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VoltageUnits.VOLT) # type: ignore
     dt_left.stop()
     dt_right.stop()
+# declare the triball config
+class FieldTriball:
+    def __init__(self, color, dist, angle, signatures: dict[str, Signature]):
+        self.color = color
+        self.dist = dist
+        self.angle = angle
+        self.vision_signature = signatures[color]
+    def score(self, sensor: Vision):
+        # this important functions rates the "error" of detected triball
+        shot = sensor.take_snapshot(self.vision_signature)
+        if shot == None:
+            return (1000, RIGHT)
+        shot = shot[0]
+        # calculations, oh my!
+        raw_cam_dist = (1/math.tan(30.5*math.pi/180))*3*316*0.5/(shot.width)
+        actual_ang = orientation.heading(DEGREES)
+        abs_err = ((self.angle % 360) - actual_ang) % 360 # 0 to 360
+        norm_err = (-abs_err % -180)+(180 if abs_err>=180 else 0) # -180 to 180
+        # distance
+        precise_distance = abs(distance.object_distance(INCHES)-self.dist)/10
+        accurate_distance = abs(raw_cam_dist-self.dist)/10
+        # center
+        centered = (316/2-shot.centerX)/(316/2)
+        # angle
+        angle_diff = norm_err/180
+        # final
+        return (angle_diff + precise_distance + accurate_distance + abs(centered)), (RIGHT if centered > 0 else LEFT)
 # vision stuff
 class VisionPro:
-    def __init__(self):
-        self.signatures = { # detect triballs
-            'GREEN': Signature(1, -6453, -5851, -6152, -6189, -5443, -5816, 6.300, 0),
-            'RED': Signature(2, 10417, 11277, 10847, -1703, -981, -1342, 11.000, 0),
-            'BLUE': Signature(3, -4533, -3863, -4198, 10449, 11739, 11094, 9.900, 0)
-        }
+    def __init__(self, config):
+        def signatures_brightness_from_utility(generated_config):
+            def numerify(str):
+                try: 
+                    return int(str)
+                except:
+                    return float(str)
+            lines = [x for x in generated_config.split('\n') if not x == '']
+            triballs = lines[:3]
+            triballs = [l.split('(')[-1][:-2] for l in triballs]
+            triballs = [[numerify(i) for i in l.split(',')] for l in triballs]
+            signatures = [Signature(*x) for x in triballs]
+
+            brightness = int(lines[-1].split(',')[1])
+            return signatures, brightness
+        sigs, brightness = signatures_brightness_from_utility(config)
+        self.signatures = dict(zip(
+            ['GREEN', 'RED', 'BLUE'],
+            sigs
+        ))
         self.colors = {
             'GREEN': Color.GREEN,
             'BLUE': Color.BLUE,
             'RED': Color.RED
         }
         self.index_lookup = {'GREEN': 1, 'RED': 2, 'BLUE': 3}
-        brightness = 71
-        self.sensor = Vision(Ports.PORT16, brightness, *list(self.signatures.values())) # resolution 316 horizontal, 212 vertical
-    def is_detecting_triball(self, color):
-        shot = self.sensor.take_snapshot(self.index_lookup[color], 1)
-        if shot == None:
-            return -1
-        width = shot[0].width
-        dist = (1/math.tan(30.5*math.pi/180))*(3*316)/(2*width)
-        return dist
-reality = VisionPro() # definitely not a joke ;)
+        self.sensor = Vision(Ports.PORT16, brightness, *sigs) # resolution 316 horizontal, 212 vertical
+    def turn2triball(self, triball: FieldTriball):
+        dt.turn2(triball.angle)
 
-while True:
-    print(distance.object_distance(INCHES), reality.is_detecting_triball('GREEN')*1.7)
-"""
-vision::signature TRIBALL_GREEN (1, -6453, -5851, -6152, -6189, -5443, -5816, 6.300, 0);
-vision::signature TRIBALL_RED (2, 10417, 11277, 10847, -1703, -981, -1342, 11.000, 0);
-vision::signature TRIBALL_BLUE (3, -4533, -3863, -4198, 10449, 11739, 11094, 9.900, 0);
-vision::signature KAIRA (4, 0, 0, 0, 0, 0, 0, 3.000, 0);
-vision::signature SIG_5 (5, 0, 0, 0, 0, 0, 0, 2.500, 0);
-vision::signature SIG_6 (6, 0, 0, 0, 0, 0, 0, 2.500, 0);
-vision::signature SIG_7 (7, 0, 0, 0, 0, 0, 0, 2.500, 0);
-vex::vision vision1 ( vex::PORT1, 71, TRIBALL_GREEN, TRIBALL_RED, TRIBALL_BLUE, KAIRA, SIG_5, SIG_6, SIG_7 );
-"""
+        (error, dir) = triball.score(self.sensor)
+        minimum = (error, orientation.heading(DEGREES))
+        initial_dir = dir
+
+        while dir == initial_dir:
+            (error, dir) = triball.score(self.sensor)
+            if error < minimum[0]:
+                minimum = (error, orientation.heading(DEGREES))
+            wait(5, MSEC)
+        
+        dt.turn2(minimum[1])
+        '''
+        turn to triball psuedocode:
+        1. turn to angle
+        2. use score fn to determine which way to go
+        3. start turning that way, recording maximum which angle
+        4. if maximum begins to decrease, turn2(maximum.angle)
+        5. yay! 
+        '''
+
+config_str = '''vision::signature TRIBALL_GREEN (1, -5285, -4769, -5028, -6257, -5829, -6044, 4.900, 0);
+vision::signature TRIBALL_RED (2, 9015, 11079, 10047, -1365, -905, -1135, 3.000, 0);
+vision::signature TRIBALL_BLUE (3, -4131, -3709, -3920, 9199, 9703, 9451, 11.000, 0);
+vision::signature SIG_4 (4, 0, 0, 0, 0, 0, 0, 3.000, 0);
+vision::signature SIG_5 (5, 0, 0, 0, 0, 0, 0, 3.000, 0);
+vision::signature SIG_6 (6, 0, 0, 0, 0, 0, 0, 3.000, 0);
+vision::signature SIG_7 (7, 0, 0, 0, 0, 0, 0, 3.000, 0);
+vex::vision vision1 ( vex::PORT1, 50, TRIBALL_GREEN, TRIBALL_RED, TRIBALL_BLUE, SIG_4, SIG_5, SIG_6, SIG_7 );'''
+reality = VisionPro(config_str) # definitely not a joke ;)
+triball = FieldTriball('GREEN', 12, 90, reality.signatures)
+
+orientation.set_heading(90, DEGREES)
+
+# wait(500, MSEC)
+
