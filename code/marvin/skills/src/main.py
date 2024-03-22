@@ -481,10 +481,4 @@ def autonomous():
         first = False
     # print(brain.timer.time(SECONDS))
     brain.screen.print(brain.timer.time(SECONDS))
-brain.timer.clear()
-dt.turn2(180)
-print(brain.timer.time(MSEC))
-wait(0.5, SECONDS)
-print(orientation.heading(DEGREES))
-#print("\033[2J") # clear console
-#competition = Competition(driver_control, autonomous) 
+competition = Competition(driver_control, autonomous) 

@@ -228,6 +228,46 @@ class Drivetrain:
             dt_right.stop()
             print(brain.timer.time(SECONDS)-initial_time)
         '''  
+
+    def old_turn2(self, angle_unmodded, speed=41):
+        '''
+        ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
+
+        #### Arguments:
+            angle_unmodded: angle turning to, in degrees clockwise. Negative inputs are allowed and will be interpreted as degrees counterclockwise. Reference point is set during calibration
+            speed (>0, <100): absolute speeds of both sides, in percent (41 has been empirically derived to be the fastest)
+        #### Returns:
+            None
+        #### Examples:
+            # slowly turn to a heading of 180˚:
+            dt.turn2(180, speed=15)
+            # draws a square
+            for i in range(4):
+                dt.turn2(i*90)
+                dt.drive4(10)
+        '''
+        # constants
+        angle = angle_unmodded % 360
+        initial_time = brain.timer.time(SECONDS)
+        # initial heading
+        h = orientation.heading(DEGREES)
+        # main loop
+        while abs(angle - h) % 360 > 1:
+            # calculations
+            h = orientation.heading(DEGREES)
+            vel = abs((angle - h + 180) % 360 - 180) * speed * 2 / 180 + 3
+            # action!
+            dt_left.spin(FORWARD if (angle - h + 180) % 360 - 180 > 0 else REVERSE, vel, PERCENT)
+            dt_right.spin(REVERSE if (angle - h + 180) % 360 - 180 > 0 else FORWARD, vel, PERCENT)
+            # wait
+            wait(10, MSEC)
+        # stop dt
+        dt_left.stop()
+        dt_right.stop()
+        # rerun if drift
+        if abs(angle - orientation.heading(DEGREES)) % 360 > 1:
+            self.turn2(angle, speed=10)
+        #print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
 # END NEW CODE HERE
        
 dt = Drivetrain(1, 4, 11)
@@ -303,41 +343,85 @@ class VisionPro:
         }
         self.index_lookup = {'GREEN': 1, 'RED': 2, 'BLUE': 3}
         self.sensor = Vision(Ports.PORT16, brightness, *sigs) # resolution 316 horizontal, 212 vertical
-    def turn2triball(self, triball: FieldTriball):
-        dt.turn2(triball.angle)
+    def turn2triball(self, triball: str, timeout=1):
+        # uses trig to calculate approx relative angle of triball relative to vision sensor
+        # setup fns and consts
+        def pixel_to_angle(pixel_diff):
+            return math.atan(
+                pixel_diff * math.tan(30.5 * math.pi/180) / 108
+            ) * 180/math.pi
+        initial_time = brain.timer.time(SECONDS)
+        # wait until take snapshot
+        snap = self.sensor.take_snapshot(self.signatures[triball])
+        timeouted = False
+        running = True
+        while running:
+            snap = self.sensor.take_snapshot(self.signatures[triball])
+            if not snap == None:
+                print('DETECTED')
+                running = False
+            if brain.timer.time(SECONDS) - initial_time > timeout:
+                print('TIMEOUTING')
+                timeouted = True
+                running = False
+            wait(50, MSEC)
+        # math time!
+        if not timeouted:
+            angle = pixel_to_angle(108-snap[0].centerX)
+            dt.old_turn2(orientation.heading(DEGREES) + angle)
+            if distance.object_distance(INCHES) > 40:
+                self.turn2triball(triball)
+            else:
+                dt.drive4(-distance.object_distance(INCHES)*0.7)
+    def _turn2tri(self, color: str, angle, target_dist, tol_dist = 2, tol_angle = 10, timeout=2):
+        dt.old_turn2(angle-9)
+        print(orientation.heading(DEGREES))
+        # next
+        dt_left.spin(FORWARD, 3, PERCENT)
+        dt_right.spin(REVERSE, 3, PERCENT)
+        # loop
+        running = True
+        initial_time = brain.timer.time(SECONDS)
+        reason = ""
+        while running:
+            if not ( (angle-tol_angle) % 360 < orientation.heading(DEGREES) < (angle + tol_angle) % 360 ):
+                reason = "ANGLE TOLERANCE"
+                running = False
+            if brain.timer.time(SECONDS) - initial_time > timeout:
+                reason = "TIMEOUT"
+                running = False
+            # if target_dist - tol_dist < distance.object_distance(INCHES) < target_dist + tol_dist:
+            #     reason = "DISTANCE MET"
+            #     running = False
+            if distance.object_size == ObjectSizeType.MEDIUM:
+                reason = 'MEDIUM'
+                running = False
+         # stop all
+        dt_left.stop()
+        dt_right.stop()
+        print(reason, distance.object_distance(INCHES), orientation.heading(DEGREES))
 
-        (error, dir) = triball.score(self.sensor)
-        minimum = (error, orientation.heading(DEGREES))
-        initial_dir = dir
-
-        while dir == initial_dir:
-            (error, dir) = triball.score(self.sensor)
-            if error < minimum[0]:
-                minimum = (error, orientation.heading(DEGREES))
-            wait(5, MSEC)
-        
-        dt.turn2(minimum[1])
-        '''
-        turn to triball psuedocode:
-        1. turn to angle
-        2. use score fn to determine which way to go
-        3. start turning that way, recording maximum which angle
-        4. if maximum begins to decrease, turn2(maximum.angle)
-        5. yay! 
-        '''
-
-config_str = '''vision::signature TRIBALL_GREEN (1, -5285, -4769, -5028, -6257, -5829, -6044, 4.900, 0);
-vision::signature TRIBALL_RED (2, 9015, 11079, 10047, -1365, -905, -1135, 3.000, 0);
-vision::signature TRIBALL_BLUE (3, -4131, -3709, -3920, 9199, 9703, 9451, 11.000, 0);
+config_str = '''vision::signature TRIBALL_GREEN (1, -5183, -2857, -4020, -6013, -3823, -4918, 3.000, 0);
+vision::signature TRIBALL_RED (2, 7821, 10139, 8980, -1445, -1053, -1250, 3.000, 0);
+vision::signature TRIBALL_BLUE (3, -3619, -2753, -3186, 6785, 9133, 7960, 3.000, 0);
 vision::signature SIG_4 (4, 0, 0, 0, 0, 0, 0, 3.000, 0);
 vision::signature SIG_5 (5, 0, 0, 0, 0, 0, 0, 3.000, 0);
 vision::signature SIG_6 (6, 0, 0, 0, 0, 0, 0, 3.000, 0);
 vision::signature SIG_7 (7, 0, 0, 0, 0, 0, 0, 3.000, 0);
 vex::vision vision1 ( vex::PORT1, 50, TRIBALL_GREEN, TRIBALL_RED, TRIBALL_BLUE, SIG_4, SIG_5, SIG_6, SIG_7 );'''
 reality = VisionPro(config_str) # definitely not a joke ;)
-triball = FieldTriball('GREEN', 12, 90, reality.signatures)
+# colors = ['GREEN', 'RED', 'BLUE']
+# while True:
+#     wait(10, MSEC)
+#     color = None
+#     if controller_1.buttonX.pressing():
+#         color = 'GREEN'
+#     elif controller_1.buttonA.pressing() or controller_1.buttonY.pressing():
+#         color = 'RED'
+#     elif controller_1.buttonB.pressing():
+#         color = 'BLUE'
+#     if color:
+#         reality.turn2triball(color)
+#     wait(5, MSEC)
 
-orientation.set_heading(90, DEGREES)
-
-# wait(500, MSEC)
-
+#reality._turn2tri('GREEN', 45, target_dist=)
