@@ -70,7 +70,7 @@ class PID:
             volt = max(-12, volt)
             volt = min(-3, volt)
         return volt
-# TODO: make Drivetrain class inherit SmartDrive; this should cover lines 72 to 234 into one class & declaration
+# TODO: make Drivetrain class inherit SmartDrive; this should convert lines 74 to 237 into one class & declaration
 # inertial
 orientation = Inertial(Ports.PORT1)
 orientation.calibrate()
