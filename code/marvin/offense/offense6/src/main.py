@@ -90,7 +90,54 @@ class Drivetrain:
         self.gear_ratio = gear_ratio
         self.wheel_diameter = wheel_diameter
         self.wheelbase = wheelbase
-    def drive4(self, inches, speed=200, timeout=1):
+    def drive4(self, inches, speed=100, timeout=1.5):
+        first = brain.timer.time(SECONDS)
+        '''
+        ### I think this is the most used dt auton function; it simply drives a number of inches.
+        We are planning to eventually add a PID loop or something here later on.
+        A custom timeout solution end the command and moves on if the robot gets stuck or takes too long.
+
+        #### Arguments:
+            inches: how far to drive, in inches forward. Negative values are accepted and interpreted as inches backwards.
+            speed (>0, <100): speed of both sides, in percent
+            timeout (>0): DEPRECATED - do n
+        #### Returns:
+            None
+        #### Examples:
+            # slowly drive 24 inches (one tile):
+            dt.drive4(24, speed=25)
+            # drives across three tiles
+            dt.drive4(24*3)
+        '''
+        # speeds
+        dt_left.set_velocity(speed, PERCENT)
+        dt_right.set_velocity(speed, PERCENT)
+        # core spin
+        dt_left.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
+        dt_right.spin_for(FORWARD, (inches/(math.pi*self.wheel_diameter))*self.gear_ratio, TURNS, wait=False)
+        # record initial time; var to check if dt has accelerated
+        initial_time = brain.timer.time(SECONDS)
+        is_started = False
+        running = True
+        # main timeout loop
+        while running:
+            wait(10, MSEC)
+            # is_started makes sure we don't stop during accel
+            if dt_left.velocity(PERCENT) > 5:
+                is_started = True
+            # main checks
+            elif brain.timer.time(SECONDS)-initial_time >= timeout:
+                running = False
+            elif is_started and dt_left.velocity(PERCENT) == 0:
+                # recalculate as a form of error filtering
+                wait(40, MSEC)
+                running = not (dt_left.velocity(PERCENT) == 0)
+
+        # stop
+        dt_left.stop()
+        dt_right.stop()
+        # logging
+    def _drive4(self, inches:float, speed:int=200, timeout:float=1):
         '''
         ### I think this is the most used dt auton function; it simply drives a number of inches.
         We are planning to eventually add a PID loop or something here later on.
@@ -113,7 +160,7 @@ class Drivetrain:
         dt_right.set_velocity(speed, PERCENT)
         # consts
         dt_const = self.gear_ratio/(math.pi*self.wheel_diameter)
-        #12.5in per revolution
+        # ~12.5in per revolution
         turns = dt_const * inches
         # core spin
         dt_left.spin_for(FORWARD, dt_const*inches, TURNS, wait=False)
@@ -124,21 +171,23 @@ class Drivetrain:
         # wait until started
         while dt_left.velocity(PERCENT) <= 5:
             wait(10, MSEC)
-        # factor = 1.315556
         # main loop
         while running:
             wait(10, MSEC)
             if brain.timer.time(SECONDS) - initial_time > timeout:
+                print('TIMEOUT')
                 running = False
             elif dt_right.velocity(PERCENT) == 0:
+                print('YAS VELOCITY')
                 # recalculate as a form of error filtering
                 wait(40, MSEC)
                 running = not (dt_left.velocity(PERCENT) == 0)
+                print(running)
         # stop  
         dt_left.stop()
         dt_right.stop()
         # logging
-    def turn2(self, angle_unmodded, speed=41):
+    def turn2(self, angle_unmodded, speed=30, tolerance = 1):
         '''
         ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
 
@@ -161,7 +210,7 @@ class Drivetrain:
         # initial heading
         h = orientation.heading(DEGREES)
         # main loop
-        while abs(angle - h) % 360 > 1:
+        while abs(angle - h) % 360 > tolerance:
             # calculations
             h = orientation.heading(DEGREES)
             vel = abs((angle - h + 180) % 360 - 180) * speed * 2 / 180 + 3
@@ -174,7 +223,7 @@ class Drivetrain:
         dt_left.stop()
         dt_right.stop()
         # rerun if drift
-        if abs(angle - orientation.heading(DEGREES)) % 360 > 1:
+        if abs(angle - orientation.heading(DEGREES)) % 360 > tolerance:
             self.turn2(angle, speed=10)
         #print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
     def arc(self, rad, head, side, duration, speed=40, finish=True):
@@ -227,6 +276,13 @@ class Drivetrain:
             dt_right.stop()
             print(brain.timer.time(SECONDS)-initial_time)
         '''  
+    def old_arc(self, l, r, duration):
+        dt_left.spin(FORWARD, l, PERCENT)
+        dt_right.spin(FORWARD, r, PERCENT)
+        wait(duration, SECONDS)
+        dt_left.stop()
+        dt_right.stop()  
+dt = Drivetrain(48/36, 3.25, 11) 
 # components class that wraps all of the non-drivetrain functions into one simple namespace
 class Components:
     def __init__(self, cata_speed):
@@ -251,19 +307,44 @@ class Components:
             self.wing_value = not self.wing_value
         else:
             self.wing_value = value
-        wings.set(self.wing_value)       
-# declare classes       
-dt = Drivetrain(48/36, 3.25, 11)
-cp = Components(165) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes
-# helper functions
-def matchload_setup(mangle=20):
-    dt.drive4(12)
-    dt.turn2(180-mangle)
-    dt.drive4(12)
-    dt.drive4(2.5, speed=25)
-    # match loading
-    cp.catapult()
-    dt.turn2(180-mangle)
+        wings.set(self.wing_value) 
+cp = Components(165) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes 
+# advanced, high-level class for things that aren't directly related to components or drivetrain
+class Advanced:
+    def __init__(self, distance: Distance):
+        self.distance_sensor = distance
+    def find_triball(self, color: str, angle, tol_angle = 5, timeout = 2):
+        dt.turn2(angle-(tol_angle-1))
+        print('dsgsdgkjfdhglkj')
+        # next
+        dt_left.spin(FORWARD, 3, PERCENT)
+        dt_right.spin(REVERSE, 3, PERCENT)
+        # loop
+        running = True
+        initial_time = brain.timer.time(SECONDS)
+        while running:
+            if not ( (angle-tol_angle) % 360 < orientation.heading(DEGREES) < (angle + tol_angle) % 360 ):
+                print('angled out')
+                running = False
+            if brain.timer.time(SECONDS) - initial_time > timeout:
+                print('timed out')
+                running = False
+            if self.distance_sensor.object_size() == ObjectSizeType.MEDIUM:
+                print('checked out')
+                running = False
+         # stop all
+        dt_left.stop()
+        dt_right.stop()
+    # helper func
+    def matchload_setup(self, mangle=20):
+        dt.drive4(12)
+        dt.turn2(180-mangle)
+        dt.drive4(12)
+        dt.drive4(2.5, speed=25)
+        # match loading
+        cp.catapult()
+        dt.turn2(180-mangle)
+advanced = Advanced(distance = Distance(Ports.PORT2))
 # driver control
 def driver_control():
     # core archie setup
@@ -281,7 +362,7 @@ def driver_control():
         skills = True
         print_all('SKILLS MODE')
         orientation.set_heading(270, DEGREES)
-        matchload_setup()
+        advanced.matchload_setup()
     # cp controls
     brain.screen.clear_screen()
     controller_1.buttonL2.pressed(cp.wings)
@@ -323,5 +404,64 @@ def driver_control():
             if hang_n == 0:
                 brain.screen.clear_screen()
 def autonomous():
-    pass
-competition = Competition(driver_control, autonomous) 
+    orientation.set_heading(180, DEGREES)
+    initial_time = brain.timer.time(SECONDS)
+    # elevation
+    cp.intake(FORWARD)
+    wait(300, MSEC)
+    # get to matchload
+    dt.drive4(-22)
+    # arc, matchload
+    dt.old_arc(-50, -30, 1)
+    cp.wings(OPEN)
+    dt.old_arc(-100,-60,1)
+
+    # dt.arc(28, REVERSE, RIGHT, 0.7)
+    # cp.wings()
+    # # score!
+    # dt.arc(28, REVERSE, RIGHT, 0.7)
+    dt.drive4(-4)
+    cp.wings(CLOSE)
+    dt.drive4(4)
+    # score elevation
+    dt.turn2(-90)
+    cp.intake(REVERSE)
+    dt.drive4(8)
+    # make sure the elevation is scored
+    dt.drive4(-3)
+    dt.drive4(3)
+    # head to & intake less impossible
+    dt.turn2(-90)
+    dt.drive4(-10)
+
+    dt.turn2(203)
+    cp.intake(FORWARD)
+    dt.drive4(40)
+    advanced.find_triball('GREEN', 203, tol_angle=10)
+    dt.drive4(7)
+
+    # pseudo-arc smash
+    dt.turn2(120)
+    cp.wings()
+    dt.drive4(-10)
+
+    dt.turn2(180)
+    dt.drive4(-20)
+
+    # score less impossible
+    dt.drive4(4)
+    cp.wings()
+    dt.turn2(0)
+
+    cp.intake(REVERSE)
+    dt.drive4(12)
+    dt.drive4(-10)
+    #
+    print(brain.timer.time(SECONDS)-initial_time)
+#autonomous()
+#competition = Competition(driver_control, autonomous) 
+dt.turn2(180)
+#cp.intake(FORWARD)
+#dt.drive4(40)
+advanced.find_triball('GREEN', -135, tol_angle=10)
+#dt.drive4(7)
