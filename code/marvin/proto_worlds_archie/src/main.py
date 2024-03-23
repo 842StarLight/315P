@@ -77,16 +77,11 @@ orientation.calibrate()
 while orientation.is_calibrating():
     wait(10, MSEC)
 # the drivetrain class is completely custom, designed for simplicity, speed, & accuracy
-dt_left = MotorGroup(
-    Motor(Ports.PORT20, GearSetting.RATIO_6_1, True),
-    Motor(Ports.PORT19, GearSetting.RATIO_6_1, True),
-    Motor(Ports.PORT18, GearSetting.RATIO_6_1, True)
-)
-dt_right = MotorGroup(
-    Motor(Ports.PORT11, GearSetting.RATIO_6_1, False),
-    Motor(Ports.PORT12, GearSetting.RATIO_6_1, False),
-    Motor(Ports.PORT13, GearSetting.RATIO_6_1, False)
-)
+left = ([Ports.PORT20, Ports.PORT19, Ports.PORT18], True)
+right = ([Ports.PORT11, Ports.PORT12, Ports.PORT13], False)
+cartridge = GearSetting.RATIO_6_1
+dt_left = MotorGroup(*[Motor(port, cartridge, left[1]) for port in left[0]])
+dt_right = MotorGroup(*[Motor(port, cartridge, right[1]) for port in right[0]])
 class Drivetrain:
     def __init__(self, gear_ratio, wheel_diameter, wheelbase):
         self.gear_ratio = gear_ratio
@@ -240,20 +235,18 @@ wings = Pneumatics(brain.three_wire_port.a)
 endgame = Pneumatics(brain.three_wire_port.b)
 # intake
 intake_motor = Motor(Ports.PORT8, GearSetting.RATIO_18_1, True)
-intake_motor._direction = None
 def intake(direction):
-        if direction == None:
+        if intake_motor.direction == DirectionType.UNDEFINED:
             intake_motor.stop()
         else:
             intake_motor.spin(direction)
-        intake_motor._direction = direction
 intake_motor.set_velocity(200, PERCENT)
 # cata
 catapult = Motor(Ports.PORT9, GearSetting.RATIO_18_1, False)
 catapult.set_velocity(165, RPM) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes 
 # advanced, high-level class for things that aren't directly related to components or drivetrain
 class Advanced:
-    def __init__(self, distance_port: Distance):
+    def __init__(self, distance_port:int):
         self.distance_sensor = Distance(distance_port)
     def find_triball(self, color: str, angle, tol_angle = 5, timeout = 2):
         dt.turn2(angle-(tol_angle-1))
@@ -299,8 +292,8 @@ def driver_control():
     controller_1.buttonL2.pressed(wings.open)
     controller_1.buttonR2.pressed(wings.close)
 
-    controller_1.buttonL1.pressed(lambda: intake(None if intake_motor._direction == FORWARD else FORWARD))
-    controller_1.buttonR1.pressed(lambda: intake(None if intake_motor._direction == REVERSE else REVERSE))
+    controller_1.buttonL1.pressed(lambda: intake(None if intake_motor.direction == FORWARD else FORWARD))
+    controller_1.buttonR1.pressed(lambda: intake(None if intake_motor.direction == REVERSE else REVERSE))
 
     controller_1.buttonX.pressed(lambda: catapult.spin(FORWARD))
     controller_1.buttonB.released(catapult.stop)
