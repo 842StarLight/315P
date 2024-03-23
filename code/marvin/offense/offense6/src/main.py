@@ -254,7 +254,7 @@ class Drivetrain:
         right = ahead*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
         # velocities
         sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
-        print('fastarc', rad, head, side, duration, speed)
+        # print('fastarc', rad, head, side, duration, speed)
         # and away she goes!
         dt_right.spin(FORWARD, right*sconst*12/100, VoltageUnits.VOLT) # type: ignore
         dt_left.spin(FORWARD, left*sconst*12/100, VoltageUnits.VOLT) # type: ignore
@@ -315,7 +315,6 @@ class Advanced:
         self.distance_sensor = distance
     def find_triball(self, color: str, angle, tol_angle = 5, timeout = 2):
         dt.turn2(angle-(tol_angle-1))
-        print('dsgsdgkjfdhglkj')
         # next
         dt_left.spin(FORWARD, 3, PERCENT)
         dt_right.spin(REVERSE, 3, PERCENT)
@@ -324,13 +323,10 @@ class Advanced:
         initial_time = brain.timer.time(SECONDS)
         while running:
             if not ( (angle-tol_angle) % 360 < orientation.heading(DEGREES) < (angle + tol_angle) % 360 ):
-                print('angled out')
                 running = False
             if brain.timer.time(SECONDS) - initial_time > timeout:
-                print('timed out')
                 running = False
             if self.distance_sensor.object_size() == ObjectSizeType.MEDIUM:
-                print('checked out')
                 running = False
          # stop all
         dt_left.stop()
@@ -410,11 +406,11 @@ def autonomous():
     cp.intake(FORWARD)
     wait(300, MSEC)
     # get to matchload
-    dt.drive4(-22)
+    dt.drive4(-20)
     # arc, matchload
     dt.old_arc(-50, -30, 1)
     cp.wings(OPEN)
-    dt.old_arc(-100,-60,1)
+    dt.old_arc(-100, -60, 1)
 
     # dt.arc(28, REVERSE, RIGHT, 0.7)
     # cp.wings()
@@ -432,12 +428,14 @@ def autonomous():
     dt.drive4(3)
     # head to & intake less impossible
     dt.turn2(-90)
-    dt.drive4(-10)
+    dt.drive4(-3)
 
-    dt.turn2(203)
+    dt.turn2(180)
+    dt.drive4(20)
+    dt.turn2(175)
+    dt.drive4(20)
     cp.intake(FORWARD)
-    dt.drive4(40)
-    advanced.find_triball('GREEN', 203, tol_angle=10)
+    advanced.find_triball('GREEN', -135, tol_angle=10)
     dt.drive4(7)
 
     # pseudo-arc smash
@@ -456,12 +454,7 @@ def autonomous():
     cp.intake(REVERSE)
     dt.drive4(12)
     dt.drive4(-10)
-    #
+    # log time
     print(brain.timer.time(SECONDS)-initial_time)
-#autonomous()
-#competition = Competition(driver_control, autonomous) 
-dt.turn2(180)
-#cp.intake(FORWARD)
-#dt.drive4(40)
-advanced.find_triball('GREEN', -135, tol_angle=10)
-#dt.drive4(7)
+autonomous()
+# competition = Competition(driver_control, autonomous) 
