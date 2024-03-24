@@ -32,8 +32,7 @@ class BrainScreen:
     def autonomous_selector(self, options=list[str]):
         raise NameError('Autonomous selector not yet implemented')
 screen = BrainScreen()
-
-# the core feedback loop; a reusable controller that we use in two of our crucial architectural functions
+# a core feedback loop; a reusable controller that we use in two of our crucial architectural functions
 class PID:
     def __init__(self, sample_rate, initial_error, consts): # sample_rate in seconds
         self.sample_rate = sample_rate
@@ -43,7 +42,7 @@ class PID:
 
         self.integral = 0.0  # Initialize integral for error accumulation
         self.prev_error = initial_error  # Initialize previous error for derivative calculation
-
+    # update method
     def update(self, error):
         # Proportional term
         proportional = self.kP * error
@@ -60,6 +59,7 @@ class PID:
         velocity = proportional + integral + derivative
 
         return velocity
+    
     # voltage utility
     @staticmethod
     def clamp_volt(volt):
@@ -70,25 +70,48 @@ class PID:
             volt = max(-12, volt)
             volt = min(-3, volt)
         return volt
-# TODO: make Drivetrain class inherit SmartDrive; this should convert lines 74 to 237 into one class & declaration
-# inertial
-orientation = Inertial(Ports.PORT1)
-orientation.calibrate()
-while orientation.is_calibrating():
-    wait(10, MSEC)
 # the drivetrain class is completely custom, designed for simplicity, speed, & accuracy
-left = ([Ports.PORT20, Ports.PORT19, Ports.PORT18], True)
-right = ([Ports.PORT11, Ports.PORT12, Ports.PORT13], False)
-cartridge = GearSetting.RATIO_6_1
-dt_left = MotorGroup(*[Motor(port, cartridge, left[1]) for port in left[0]])
-dt_right = MotorGroup(*[Motor(port, cartridge, right[1]) for port in right[0]])
-class Drivetrain:
-    def __init__(self, gear_ratio, wheel_diameter, wheelbase):
+class DrivetrainConfig:
+    def __init__(
+            self,
+            left_ports:list[int],
+            left_bool:bool,
+            right_ports:list[int],
+            right_bool:bool,
+            cartridge:GearSetting.GearSetting,
+            gear_ratio:float,
+            wheel_diameter:float,
+            wheelbase:float
+    ):
+        self.useful_ratio = 1/gear_ratio
         self.gear_ratio = gear_ratio
+        self.left_group = MotorGroup(*[Motor(port, cartridge, left_bool) for port in left_ports])
+        self.right_group  = MotorGroup(*[Motor(port, cartridge, right_bool) for port in right_ports])
+        self.cartridge = cartridge
         self.wheel_diameter = wheel_diameter
         self.wheelbase = wheelbase
-        dt_left.set_stopping(BRAKE) 
-        dt_right.set_stopping(BRAKE)
+class Drivetrain(SmartDrive):
+    def __init__(self, config: DrivetrainConfig, inertial_port: int):
+        self.config = config
+        self.orientation = Inertial(inertial_port)
+        self.left = config.left_group
+        self.right = config.right_group
+        
+        super().__init__(
+            config.left_group,
+            config.right_group,
+            self.orientation,
+            wheelTravel=config.wheel_diameter*math.pi,
+            wheelBase=config.wheelbase,
+            units=INCHES,
+            externalGearRatio=config.gear_ratio
+        )
+
+        self.set_stopping(BRAKE)
+
+        self.orientation.calibrate()
+        while self.orientation.is_calibrating():
+            wait(10, MSEC)
     def drive4(self, inches:float, speed:int=200, timeout:float=1):
         '''
         ### I think this is the most used dt auton function; it simply drives a number of inches.
@@ -108,37 +131,25 @@ class Drivetrain:
             dt.drive4(24*3)
         '''
         # speeds
-        dt_left.set_velocity(speed, PERCENT)
-        dt_right.set_velocity(speed, PERCENT)
-        # consts
-        dt_const = self.gear_ratio/(math.pi*self.wheel_diameter)
-        # ~12.5in per revolution
-        turns = dt_const * inches
-        # core spin
-        dt_left.spin_for(FORWARD, dt_const*inches, TURNS, wait=False)
-        dt_right.spin_for(FORWARD, dt_const*inches, TURNS, wait=False)
+        self.drive_for(FORWARD if inches > 0 else REVERSE, abs(inches), INCHES, speed, PERCENT, wait=False)
         # record initial time; var to check if dt has accelerated
         initial_time = brain.timer.time(SECONDS)
         running = True
         # wait until started
-        while dt_left.velocity(PERCENT) <= 5:
+        while self.left.velocity(PERCENT) <= 5:
             wait(10, MSEC)
         # main loop
         while running:
             wait(10, MSEC)
             if brain.timer.time(SECONDS) - initial_time > timeout:
-                print('TIMEOUT')
                 running = False
-            elif dt_right.velocity(PERCENT) == 0:
-                print('YAS VELOCITY')
+            elif self.left.velocity(PERCENT) == 0:
                 # recalculate as a form of error filtering
                 wait(40, MSEC)
-                running = not (dt_left.velocity(PERCENT) == 0)
+                running = not (self.left.velocity(PERCENT) == 0)
                 print(running)
         # stop  
-        dt_left.stop()
-        dt_right.stop()
-        # logging
+        self.stop()
     def turn2(self, angle_unmodded, speed=30, tolerance = 1):
         '''
         ### A turn-to-heading function which uses a feedback loop (just P for now) in tandem with the inertial to achieve very precise results.
@@ -156,26 +167,23 @@ class Drivetrain:
                 dt.turn2(i*90)
                 dt.drive4(10)
         '''
-        # constants
+        # set up
         angle = angle_unmodded % 360
         initial_time = brain.timer.time(SECONDS)
-        # initial heading
-        h = orientation.heading(DEGREES)
+        h = self.orientation.heading(DEGREES)
         # main loop
         while abs(angle - h) % 360 > tolerance:
             # calculations
-            h = orientation.heading(DEGREES)
+            h = self.orientation.heading(DEGREES)
             vel = abs((angle - h + 180) % 360 - 180) * speed * 2 / 180 + 3
             # action!
-            dt_left.spin(FORWARD if (angle - h + 180) % 360 - 180 > 0 else REVERSE, vel, PERCENT)
-            dt_right.spin(REVERSE if (angle - h + 180) % 360 - 180 > 0 else FORWARD, vel, PERCENT)
+            self.turn(RIGHT if (angle - h + 180) % 360 - 180 > 0 else LEFT, vel, PERCENT)
             # wait
             wait(10, MSEC)
         # stop dt
-        dt_left.stop()
-        dt_right.stop()
-        # rerun if drift
-        if abs(angle - orientation.heading(DEGREES)) % 360 > tolerance:
+        self.stop()
+        # rerun if drift; logging
+        if abs(angle - self.orientation.heading(DEGREES)) % 360 > tolerance:
             self.turn2(angle, speed=10)
         #print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
     def arc(self, rad, head, side, duration, speed=40, finish=True):
@@ -202,21 +210,20 @@ class Drivetrain:
         aside = 1 if side == RIGHT else -1
         ahead = 1 if head == FORWARD else -1
         # targets for each side
-        left = ahead*(rad+aside*self.wheelbase/2) # the parenthesized portion is the abs value
-        right = ahead*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
+        left = ahead*(rad+aside*self.config.wheelbase/2) # the parenthesized portion is the abs value
+        right = ahead*(rad-aside*self.config.wheelbase/2) # of the circumference of the side's circle
         # velocities
         sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
-        # print('fastarc', rad, head, side, duration, speed)
         # and away she goes!
-        dt_right.spin(FORWARD, right*sconst*12/100, VoltageUnits.VOLT) # type: ignore
-        dt_left.spin(FORWARD, left*sconst*12/100, VoltageUnits.VOLT) # type: ignore
+        self.left.spin(FORWARD, left*sconst*12/100, VoltageUnits.VOLT) # type: ignore
+        self.right.spin(FORWARD, right*sconst*12/100, VoltageUnits.VOLT) # type: ignore
         if not finish:
-            print(left*sconst, right*sconst)
             return None
         # wait, then stop
         wait(duration, SECONDS)
-        dt_left.stop()
-        dt_right.stop()
+        self.stop()
+        # logging
+        #print('fastarc', rad, head, side, duration, speed)
         # in case you need it - here's a simple fn to determine duration of an arc
         '''
         def test(rad):
@@ -224,15 +231,23 @@ class Drivetrain:
             initial_time = brain.timer.time(SECONDS)
             while not controller_1.buttonB.pressing():
                 wait(1, MSEC)
-            dt_left.stop()
-            dt_right.stop()
+            dt.stop()
             print(brain.timer.time(SECONDS)-initial_time)
         '''  
-dt = Drivetrain(48/36, 3.25, 11) 
-
+config = DrivetrainConfig(
+    [Ports.PORT20, Ports.PORT19, Ports.PORT18], True,
+    [Ports.PORT11, Ports.PORT12, Ports.PORT13], False,
+    cartridge=GearSetting.RATIO_6_1, gear_ratio=36/48, wheel_diameter=3.25, wheelbase=11
+)
+dt = Drivetrain(
+    config,
+    1
+)
 # pneumatics
-wings = Pneumatics(brain.three_wire_port.a)
+back_wings = Pneumatics(brain.three_wire_port.a)
 endgame = Pneumatics(brain.three_wire_port.b)
+front_wings = Pneumatics(brain.three_wire_port.c)
+
 # intake
 intake_motor = Motor(Ports.PORT8, GearSetting.RATIO_18_1, True)
 def intake(direction):
@@ -241,9 +256,10 @@ def intake(direction):
         else:
             intake_motor.spin(direction)
 intake_motor.set_velocity(200, PERCENT)
-# cata
+# cata - in an iffy position right now, since we are planning to reimplement using limit switch
 catapult = Motor(Ports.PORT9, GearSetting.RATIO_18_1, False)
-catapult.set_velocity(165, RPM) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes 
+catapult.set_velocity(165, RPM) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes
+
 # advanced, high-level class for things that aren't directly related to components or drivetrain
 class Advanced:
     def __init__(self, distance_port:int):
@@ -251,21 +267,21 @@ class Advanced:
     def find_triball(self, color: str, angle, tol_angle = 5, timeout = 2):
         dt.turn2(angle-(tol_angle-1))
         # next
-        dt_left.spin(FORWARD, 3, PERCENT)
-        dt_right.spin(REVERSE, 3, PERCENT)
+        dt.left.spin(FORWARD, 3, PERCENT)
+        dt.right.spin(REVERSE, 3, PERCENT)
         # loop
         running = True
         initial_time = brain.timer.time(SECONDS)
         while running:
-            if not ( (angle-tol_angle) % 360 < orientation.heading(DEGREES) < (angle + tol_angle) % 360 ):
+            if not ( (angle-tol_angle) % 360 < dt.orientation.heading(DEGREES) < (angle + tol_angle) % 360 ):
                 running = False
             if brain.timer.time(SECONDS) - initial_time > timeout:
                 running = False
             if self.distance_sensor.object_size() == ObjectSizeType.MEDIUM:
                 running = False
          # stop all
-        dt_left.stop()
-        dt_right.stop()
+        dt.left.stop()
+        dt.right.stop()
     # helper func
     def matchload_setup(self, mangle=20):
         dt.drive4(12)
@@ -278,6 +294,7 @@ class Advanced:
 advanced = Advanced(distance_port = Ports.PORT2)
 # driver control
 def driver_control():
+    # clear timer
     brain.timer.clear()
     # skills mode + matchloading setup
     hang_n = 10
@@ -285,18 +302,18 @@ def driver_control():
     if controller_1.buttonY.pressing() or controller_1.buttonA.pressing():
         skills = True
         screen.print_all('SKILLS MODE')
-        orientation.set_heading(270, DEGREES)
+        dt.orientation.set_heading(270, DEGREES)
         advanced.matchload_setup()
     # cp controls
     brain.screen.clear_screen()
-    controller_1.buttonL2.pressed(wings.open)
-    controller_1.buttonR2.pressed(wings.close)
+    controller_1.buttonL2.pressed(lambda: front_wings.close() if front_wings.value else front_wings.open())
+    controller_1.buttonL2.pressed(lambda: back_wings.close() if back_wings.value else back_wings.open())
 
     controller_1.buttonL1.pressed(lambda: intake(None if intake_motor.direction == FORWARD else FORWARD))
     controller_1.buttonR1.pressed(lambda: intake(None if intake_motor.direction == REVERSE else REVERSE))
 
-    controller_1.buttonX.pressed(lambda: catapult.spin(FORWARD))
-    controller_1.buttonB.released(catapult.stop)
+    controller_1.buttonX.pressed(lambda: catapult.spin(FORWARD)) # will eventually phase out these controls
+    controller_1.buttonB.released(catapult.stop) # in favor of automatic matchloading thru limit switch :)
 
     controller_1.buttonUp.pressed(endgame.open)
     controller_1.buttonDown.pressed(endgame.close)
@@ -308,12 +325,13 @@ def driver_control():
         turn_speed = controller_1.axis1.position()
         l = straight_speed + turn_speed
         r = straight_speed - turn_speed
-        dt_left.spin((FORWARD if l >= 0 else REVERSE), abs(l)*12/100, VOLT) # type: ignore
-        dt_right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VOLT) # type: ignore # type: ignore
+        
+        dt.left.spin((FORWARD if l >= 0 else REVERSE), abs(l)*12/100, VOLT) # type: ignore
+        dt.right.spin((FORWARD if r >= 0 else REVERSE), abs(r)*12/100, VOLT) # type: ignore
         # logging
         logs = [
             "time: %d:%g" % (math.floor(brain.timer.time(SECONDS)/60), int(brain.timer.time(SECONDS) % 60)),
-            "dt: %d %d" % (dt_left.temperature(PERCENT), dt_right.temperature(PERCENT)), # type: ignore
+            "dt: %d %d" % (dt.left.temperature(PERCENT), dt.right.temperature(PERCENT)), # type: ignore
             "cata: %d" % catapult.temperature(PERCENT),
         ]
         screen.driver_log(logs)

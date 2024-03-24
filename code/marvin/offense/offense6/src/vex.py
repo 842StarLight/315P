@@ -468,7 +468,7 @@ MV = VoltageUnits.MV
 
 # most functions will take number in either format
 vexnumber = Union[int, float]
-VelocityPercentUnits = Union[VelocityUnits.VelocityUnits, PercentUnits.PercentUnits, VoltageUnits.VoltageUnits]
+VelocityPercentUnits = Union[PercentUnits.PercentUnits, Union[VoltageUnits.VoltageUnits, VelocityUnits.VelocityUnits]]
 TorquePercentUnits = Union[TorqueUnits.TorqueUnits, PercentUnits.PercentUnits]
 TorquePercentCurrentUnits = Union[TorqueUnits.TorqueUnits, PercentUnits.PercentUnits, CurrentUnits.CurrentUnits]
 TemperaturePercentUnits = Union[TemperatureUnits.TemperatureUnits, PercentUnits.PercentUnits]
