@@ -377,7 +377,7 @@ def driver_control():
         wait(10, MSEC)
         # dt controls
         straight_speed = controller_1.axis3.position()
-        turn_speed = 0.5*controller_1.axis1.position()
+        turn_speed = controller_1.axis1.position()
         l = straight_speed + turn_speed
         r = straight_speed - turn_speed
         dt_left.spin((FORWARD if l >= 0 else REVERSE), abs(l)*12/100, VOLT) # type: ignore
@@ -417,17 +417,18 @@ def autonomous():
     cp.intake(REVERSE)
     dt.turn2(180)
     dt.drive4(2)
-    cp.wings()
+    cp.wings(OPEN)
     cp.intake(None)
     dt.drive4(-30)
-    cp.wings()
+    cp.wings(CLOSE)
     # smash
     dt.drive4(4)
     dt.turn2(160)
     dt.drive4(10)
     dt.turn2(0)
-    cp.wings()
+    cp.wings(OPEN)
     wait(100, MSEC)
-    dt.drive4(20)
+    dt.drive4(-20)
     dt.drive4(10, speed=200)
+    cp.wings(CLOSE)
 competition = Competition(driver_control, autonomous) 

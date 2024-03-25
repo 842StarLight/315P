@@ -66,7 +66,7 @@ orientation = Inertial(Ports.PORT1)
 orientation.calibrate()
 while orientation.is_calibrating():
     wait(10, MSEC)
-print(brain.timer.time(MSEC), "Inertial calibrated")
+#print(brain.timer.time(MSEC), "Inertial calibrated")
 brain.timer.clear()
 """
 TODO:
@@ -283,36 +283,56 @@ class Drivetrain:
         dt_left.stop()
         dt_right.stop()
 
-    def arc(self, rad, ang, head=FORWARD, side=RIGHT, speed=25, timeout=5):
-        """
-        Inputs:
-        rad (>0): Radius of arc, in inches
-        ang (>0): Angle of arc, in degrees
-        head (FORWARD/REVERSE): whether the robot is moving for/backwards
-        side (LEFT/RIGHT): which side the robot is arc towards
-        """
-        # constants
-        aside = 1 if side == RIGHT else -1
+    def arc(self, rad, head, side, duration, speed=40, finish=True):
+        '''
+        ### An arc function which allows us to skip parts in autons where we alternate between turn2's and drive4's.
 
-        dt_const = self.gear_ratio/(math.pi*self.wheel_diameter) # multiply to get # of turns
-        in_const = (ang/360)*2*math.pi # multiply to get # of inches
+        #### Arguments:
+            rad (>0): Radius of arc, in inches
+            head (FORWARD/REVERSE): whether the robot is moving for/backwards
+            side (LEFT/RIGHT): which side the robot is arc towards
+            duration (>0): how long the arc should last, in seconds
+            speed (>0, <100): average speed of both sides, in percen
+        #### Returns:
+            None
+        #### Examples:
+            # slowly draw a circle with diameter of 20in
+            dt.arc(10, FORWARD, RIGHT, 7, speed=25)
+            # draws a rounded square
+            for i in range(4):
+                dt.drive4(2)
+                dt.arc(5, FORWARD, RIGHT, 1.5, speed=65) # adjust duration to make this a quarter circle
+        '''
+        # convert sides to numbers
+        aside = 1 if side == RIGHT else -1
+        ahead = 1 if head == FORWARD else -1
         # targets for each side
-        left = dt_const*in_const*(rad+aside*self.wheelbase/2) # the parenthesized portion is the abs value
-        right = dt_const*in_const*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
+        left = ahead*(rad+aside*self.wheelbase/2) # the parenthesized portion is the abs value
+        right = ahead*(rad-aside*self.wheelbase/2) # of the circumference of the side's circle
         # velocities
-        dt_left.set_velocity(speed*math.sqrt(left/right), PERCENT)
-        dt_right.set_velocity(speed*math.sqrt(right/left), PERCENT)
-        # spin!
-        dt_right.spin_for(head, right, TURNS, wait=False)
-        dt_left.spin_for(head, left, TURNS, wait=False)
-        # timeout routine
-        old_time = brain.timer.time(SECONDS)
-        while brain.timer.time(SECONDS) - old_time < timeout:
-            if dt_left.is_done():
-                break
-            wait(10, MSEC)
+        sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
+        print('fastarc', rad, head, side, duration, speed)
+        # and away she goes!
+        dt_right.spin(FORWARD, right*sconst*12/100, VoltageUnits.VOLT) # type: ignore
+        dt_left.spin(FORWARD, left*sconst*12/100, VoltageUnits.VOLT) # type: ignore
+        if not finish:
+            print(left*sconst, right*sconst)
+            return None
+        # wait, then stop
+        wait(duration, SECONDS)
         dt_left.stop()
         dt_right.stop()
+        # in case you need it - here's a simple fn to determine duration of an arc
+        '''
+        def test(rad):
+            dt.arc(..., finish=False)
+            initial_time = brain.timer.time(SECONDS)
+            while not controller_1.buttonB.pressing():
+                wait(1, MSEC)
+            dt_left.stop()
+            dt_right.stop()
+            print(brain.timer.time(SECONDS)-initial_time)
+        '''
 dt = Drivetrain(48/36, 3.25, 11)
 cp = Components(80)
 mangle = 20
@@ -364,7 +384,7 @@ def driver_control():
         wait(10, MSEC)
         # dt controls
         straight_speed = controller_1.axis3.position()
-        turn_speed = 0.5*controller_1.axis1.position()
+        turn_speed = controller_1.axis1.position()
         l = straight_speed + turn_speed
         r = straight_speed - turn_speed
         dt_left.spin((FORWARD if l >= 0 else REVERSE), abs(l)*12/100, VOLT) # type: ignore
@@ -395,23 +415,25 @@ class Advanced:
         if turn_to_start:
             dt.turn2(min_angle)
         # next
-        dt_left.spin(REVERSE if direction==LEFT else FORWARD, 2, PERCENT)
-        dt_right.spin(FORWARD if direction==LEFT else REVERSE, 2, PERCENT)
+        dt_left.spin(REVERSE if direction==LEFT else FORWARD, 5, PERCENT)
+        dt_right.spin(FORWARD if direction==LEFT else REVERSE, 5, PERCENT)
         # loop
-        found = None
+        found = False
         running = True
-        while not found:
-            if min(min_angle, max_angle)-1 > orientation.heading(DEGREES) > max(min_angle, max_angle)+1:
-                print(orientation.heading(DEGREES))
-                found = 'ANGLED OUT'
+        while running:
+            if not (min(min_angle, max_angle)-1 < orientation.heading(DEGREES) < max(min_angle, max_angle)+1):
+                #print(orientation.heading(DEGREES), 'ANGLED OUT')
+                found = False
+                running = False
             #print(self.distance_sensor.object_size())
             size = self.distance_sensor.object_size()
-            print(size, size in [ObjectSizeType.MEDIUM, ObjectSizeType.SMALL])
-            if size in [ObjectSizeType.MEDIUM, ObjectSizeType.SMALL]:
+            #print(size, size in [ObjectSizeType.MEDIUM, ObjectSizeType.SMALL])
+            if size in [ObjectSizeType.MEDIUM]:
                 distance = self.distance_sensor.object_distance(INCHES)
-                print(distance)
-                found = 'FOUND'
-                running = (distance <= max_distance) and self.distance_sensor.is_object_detected()
+                if (distance <= max_distance) and self.distance_sensor.is_object_detected():
+                    running = False
+                    found = True
+                    print(distance)
             wait(10, MSEC)
          # stop all
         dt_left.stop()
@@ -442,58 +464,84 @@ def autonomous_6():
     dt.turn2(90, tolerance=5)
     cp.wings()
     dt.arc_new(-50,-30,1)
-
+    wait(100,MSEC)
     cp.wings()
     wait(100,MSEC)
     dt.arc_new(-100,-60,1)
     #checkTime('after arcs to push in matchload + preload')
-    dt.drive4(4, speed=200, timeout = 0.2)
-    dt.drive4(-8, speed = 200, timeout = 0.3)
+    dt.drive4(2, speed=200, timeout = 0.2)
+    dt.turn2(0, tolerance = 3)
+    dt.drive4(-4, speed = 200, timeout = 0.1)
     dt.drive4(4, speed=200, timeout = 0.2)
 
     # score elevation
     dt.turn2(180, tolerance = 3)
     cp.intake(REVERSE)
+    wait(100,MSEC)
     dt.drive4(10,speed=200, timeout=0.3)
     # dt.drive4(-3,speed=200,timeout=0.2)
     # dt.drive4(3,speed=200,timeout=0.2)
     #checkTime('scoring elevation!!!')
-    dt.turn2(180, tolerance = 3)
-    dt.drive4(-12,timeout=0.5)
+    dt.drive4(-4, timeout=0.5)
+   # dt.turn2(180, tolerance = 3)
 
     # intake less impossible
-    cp.intake(FORWARD)
-    dt.turn2(105)
-    dt.drive4(18)
-    found = advanced.find_triball(105, 90, 37, direction=LEFT, turn_to_start=False)
-    dist = advanced.distance_sensor.object_distance(INCHES) if found == 'FOUND' else 50
-    print(dist)
-    dt.drive4(dist, timeout=1.5)
-    dt.turn2(30)
-    cp.wings()
-
-    # arc!
-    #dt.drive4(-10,timeout=1)
-    #dt.turn2(0)
-    dt.arc_new(-41,-88, 1) 
     dt.turn2(90)
+    dt.drive4(38, timeout=0.5)
+    cp.intake(FORWARD)
 
-    # smash
-    dt.drive4(-10,timeout=1)
+    found = advanced.find_triball(90, 145, 13, direction=RIGHT, turn_to_start=False)
+    if (found):
+        dist = advanced.distance_sensor.object_distance(INCHES) 
+    else: 
+        dt.turn2(110, tolerance = 2) 
+        dist = 10
 
-    # score less impossible
-    dt.drive4(4)
-    cp.wings()
-    dt.turn2(-90)
-    cp.intake(REVERSE)
-    dt.drive4(12)
-    dt.drive4(-10)
+    #print("found =", found, "distance=", dist, "angle= ", orientation.heading(DEGREES))
+    dt.drive4(dist - 2, timeout=.75)
+
+    # arc smash!
+    #dt.arc(17, FORWARD, RIGHT, 0.6, speed=65)
+    if False: 
+        dt.turn2(160, tolerance=3)
+        dt.drive4(18,timeout=.3)
+
+        dt.turn2(-90, tolerance = 1)
+        dt.drive4(32,timeout=1)
+        cp.intake(REVERSE)
+        dt.drive4(-10, speed = 200)
+        dt.turn2(90, tolerance = 1)
+
+        cp.wings()
+
+        dt.drive4(-10)
+        
+        cp.intake(None)
+    if True: 
+        dt.turn2(-125, tolerance=1)
+        cp.intake(REVERSE)
+        wait(200, MSEC)
+        dt.drive4(-3,timeout=.5)
+
+        dt.turn2(180, tolerance=1)
+        print(orientation.heading(DEGREES))
+        dt.drive4(18,timeout=.5)
+        dt.turn2(90, tolerance=1)
+        cp.wings()
+        dt.drive4(-32,timeout=1)
+    else:
+        dt.turn2(-118)
+        cp.intake(None)
+        dt.drive4(40, timeout=1)
+        dt.drive4(-5)
+        dt.drive4(10)
+        dt.drive4(-10, speed=200)
+        
 
     # stats
     print(brain.timer.time(SECONDS))
-autonomous_6()
-#driver_control()
-#competition = Competition(driver_control, autonomous_6)
+    print(dt.dt_time, dt.turn_time, dt.turn_times )
+competition = Competition(driver_control, autonomous_6)
 '''
     dt.turn2(-90)
     dt.drive4(-3)

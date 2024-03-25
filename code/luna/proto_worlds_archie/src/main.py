@@ -6,8 +6,9 @@ import random
 brain = Brain()
 controller_1 = Controller(PRIMARY)
 # logging on the brain
-# TODO: add auton selector
+# TODO: test auton selector
 class BrainScreen:
+    # controls the brain lcd (resolution 480x272)
     def __init__(self):
         brain.screen.set_font(FontType.PROP60)
 
@@ -21,16 +22,87 @@ class BrainScreen:
         brain.screen.print("cata temp")
         self.log_n = 0
     def driver_log(self, logs):
+        brain.screen.set_font(FontType.PROP60)
         brain.screen.set_cursor(1 + self.log_n % 3, 1)
         brain.screen.print(logs[self.log_n % 3])
         self.log_n += 1
     def print_all(self, msg):
+        brain.screen.set_font(FontType.PROP60)
         brain.screen.clear_screen()
         for i in range(3):
             brain.screen.set_cursor(i+1,1)
             brain.screen.print(msg)
-    def autonomous_selector(self, options=list[str]):
-        raise NameError('Autonomous selector not yet implemented')
+    def autonomous_selector(self, options=list[str])->int:
+        #raise ValueError('not yet implemented')
+        # we have 272 pixels. top 32 are status bar
+        assert(int(272/len(options)+2) >= 12, 'invalid option-list size')
+        # squares:
+        back_arrow_square = ((30, 120), (150, 222))
+        initial_cquare = ((180, 102), (300, 222))
+        front_arrow_square = ((330, 102), (450, 222))
+        # utilities
+        def draw_triangle(top, bottom):
+            brain.screen.draw_line(top[0], top[1], top[0], bottom[1])
+            brain.screen.draw_line(top[0], top[1], bottom[0], (top[1]+bottom[1])/2)
+            brain.screen.draw_line(top[0], bottom[1], bottom[0], (top[1]+bottom[1])/2)
+        def coords_in_box(coords, box):
+            x, y = coords
+            x_in_r = x in range(min(box[0][0], box[1][0]), max(box[0][0], box[1][0]))
+            y_in_r = y in range(min(box[0][1], box[1][1]), max(box[0][1], box[1][1]))
+            return x_in_r and y_in_r
+        # setup
+        draw_triangle(back_arrow_square[1], back_arrow_square[0])
+        draw_triangle(front_arrow_square[0], front_arrow_square[1])
+        brain.screen.draw_circle((initial_cquare[0][0]+initial_cquare[1][0])/2, (initial_cquare[0][1]+initial_cquare[1][1])/2, 120/2)
+        # get preliminary choice
+        ready_to_confirm = False
+        index = 0
+        prev_coords = (brain.screen.x_position(), brain.screen.y_position())
+        while not ready_to_confirm:
+            brain.screen.set_font(FontType.MONO20)
+            brain.screen.set_cursor(1, 1)
+            brain.screen.print(str(index+1) + ': ' + options[index]) # printing down to 32+20 = pixel 52. start from 54, giving us 218 pixels
+            
+            coords = (brain.screen.x_position(), brain.screen.y_position())
+            if not coords == prev_coords:
+                prev_coords = coords
+                if coords_in_box(coords, back_arrow_square):
+                    index = max(index-1, 0)
+                elif coords_in_box(coords, front_arrow_square):
+                    index = min(index+1, len(options)-1)
+                elif coords_in_box(coords, initial_cquare):
+                    ready_to_confirm = True
+            
+            wait(10, MSEC)
+        # reconfirm
+        brain.screen.clear_screen()
+        brain.screen.set_cursor(1, 1)
+        brain.screen.print('Confirm?')
+        brain.screen.next_row()
+        brain.screen.print(options[index])
+        brain.screen.next_row()
+        brain.screen.print('left press = no, right press = yes')
+        confirmed = None
+        while confirmed == None:
+            coords = (brain.screen.x_position(), brain.screen.y_position())
+            if not coords == prev_coords:
+                confirmed = coords[0] < 480/2
+        if confirmed: 
+            return index
+        else:
+            return self.autonomous_selector(options)
+        '''
+        up to row 32: status bar
+        up to row 52: selected auton (+20)
+        up to row 102: buffer (+50)
+        up to row 222: 3 120px squares, padding 30px between (3*120+4*30=480) (+120)
+        up to row 272 (end): buffer (+50)
+        squares:
+        30, 102 to 150, 222
+        180, 102 to 300, 222
+        330, 102 to 450, 222 
+        '''
+
 screen = BrainScreen()
 # a core feedback loop; a reusable controller that we use in two of our crucial architectural functions
 class PID:
@@ -48,7 +120,7 @@ class PID:
         proportional = self.kP * error
 
         # Integral term
-        self.integral += error*self.sample_rate  # Accumulate error over time
+        self.integral += self.sample_rate * error  # Accumulate error over time
         integral = self.kI * self.integral
 
         # Derivative term
@@ -71,42 +143,27 @@ class PID:
             volt = min(-3, volt)
         return volt
 # the drivetrain class is completely custom, designed for simplicity, speed, & accuracy
-class DrivetrainConfig:
-    def __init__(
-            self,
-            left_ports:list[int],
-            left_bool:bool,
-            right_ports:list[int],
-            right_bool:bool,
-            cartridge:GearSetting.GearSetting,
-            gear_ratio:float,
-            wheel_diameter:float,
-            wheelbase:float
-    ):
-        self.useful_ratio = 1/gear_ratio
-        self.gear_ratio = gear_ratio
-        self.left_group = MotorGroup(*[Motor(port, cartridge, left_bool) for port in left_ports])
-        self.right_group  = MotorGroup(*[Motor(port, cartridge, right_bool) for port in right_ports])
-        self.cartridge = cartridge
-        self.wheel_diameter = wheel_diameter
-        self.wheelbase = wheelbase
+DrivetrainConfig = dict[str, Union[tuple[list[int], bool], Union[float, GearSetting.GearSetting]]]
 class Drivetrain(SmartDrive):
     def __init__(self, config: DrivetrainConfig, inertial_port: int):
-        self.config = config
-        self.orientation = Inertial(inertial_port)
-        self.left = config.left_group
-        self.right = config.right_group
-        
-        super().__init__(
-            config.left_group,
-            config.right_group,
-            self.orientation,
-            wheelTravel=config.wheel_diameter*math.pi,
-            wheelBase=config.wheelbase,
-            units=INCHES,
-            externalGearRatio=config.gear_ratio
-        )
+        self._config = config
 
+        self.orientation = Inertial(inertial_port)
+        
+        self.left = MotorGroup(*[Motor(port, config['cartridge'], config['left'][1]) for port in config['left'][0]])
+        self.right = MotorGroup(*[Motor(port, config['cartridge'], config['right'][1]) for port in config['right'][0]])
+
+        super().__init__(
+            self.left,
+            self.right,
+            self.orientation,
+            wheelTravel=config['wheel_diameter']*math.pi,
+            wheelBase=config['wheelbase'],
+            units=INCHES,
+            externalGearRatio=config['gear_ratio']
+        )
+        self.inches_to_rotations = 1/(config['gear_ratio']*math.pi*config['wheel_diameter']) # multiply inches by this to get # of motor revolutions
+        
         self.set_stopping(BRAKE)
 
         self.orientation.calibrate()
@@ -186,7 +243,7 @@ class Drivetrain(SmartDrive):
         if abs(angle - self.orientation.heading(DEGREES)) % 360 > tolerance:
             self.turn2(angle, speed=10)
         #print('turn2/done', angle_unmodded, 'deg', 'took', brain.timer.time(SECONDS)-initial_time, 'sec')
-    def arc(self, rad, head, side, duration, speed=40, finish=True):
+    def arc(self, rad, head, side, duration, speed=65, finish=True):
         '''
         ### An arc function which allows us to skip parts in autons where we alternate between turn2's and drive4's.
 
@@ -210,8 +267,8 @@ class Drivetrain(SmartDrive):
         aside = 1 if side == RIGHT else -1
         ahead = 1 if head == FORWARD else -1
         # targets for each side
-        left = ahead*(rad+aside*self.config.wheelbase/2) # the parenthesized portion is the abs value
-        right = ahead*(rad-aside*self.config.wheelbase/2) # of the circumference of the side's circle
+        left = ahead*(rad+aside*self._config['wheelbase']/2) # the parenthesized portion is the abs value
+        right = ahead*(rad-aside*self._config['wheelbase']/2) # of the circumference of the side's circle
         # velocities
         sconst = speed/(abs(left)/2+abs(right)/2) # to add the speed factor
         # and away she goes!
@@ -234,28 +291,25 @@ class Drivetrain(SmartDrive):
             dt.stop()
             print(brain.timer.time(SECONDS)-initial_time)
         '''  
-config = DrivetrainConfig(
-    [Ports.PORT20, Ports.PORT19, Ports.PORT18], True,
-    [Ports.PORT11, Ports.PORT12, Ports.PORT13], False,
-    cartridge=GearSetting.RATIO_6_1, gear_ratio=36/48, wheel_diameter=3.25, wheelbase=11
-)
-dt = Drivetrain(
-    config,
-    1
-)
+dt = Drivetrain({
+    'left': ([Ports.PORT20, Ports.PORT19, Ports.PORT18], True),
+    'right': ([Ports.PORT11, Ports.PORT12, Ports.PORT13], False),
+    'cartridge': GearSetting.RATIO_6_1, 'gear_ratio': 36/48,
+    'wheel_diameter': 3.25, 'wheelbase': 11
+    }, 1)
 # pneumatics
 back_wings = Pneumatics(brain.three_wire_port.a)
 endgame = Pneumatics(brain.three_wire_port.b)
 front_wings = Pneumatics(brain.three_wire_port.c)
-
 # intake
 intake_motor = Motor(Ports.PORT8, GearSetting.RATIO_18_1, True)
 def intake(direction):
         if intake_motor.direction == DirectionType.UNDEFINED:
             intake_motor.stop()
         else:
-            intake_motor.spin(direction)
+            intake_motor.spin(direction, 12, VOLT)
 intake_motor.set_velocity(200, PERCENT)
+
 # cata - in an iffy position right now, since we are planning to reimplement using limit switch
 catapult = Motor(Ports.PORT9, GearSetting.RATIO_18_1, False)
 catapult.set_velocity(165, RPM) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes
