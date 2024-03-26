@@ -312,7 +312,7 @@ intake_motor.set_velocity(200, PERCENT)
 
 # cata - in an iffy position right now, since we are planning to reimplement using limit switch
 catapult = Motor(Ports.PORT9, GearSetting.RATIO_18_1, False)
-catapult.set_velocity(165, RPM) # 144 triballs per minute, 2.4 per sec #  (4/5)(motor rpm) = matchloads per minutes
+catapult.set_velocity(165, RPM) # 144 triballs per minute, 2.4 per sec; (4/5)(motor rpm) = matchloads per minutes
 
 # advanced, high-level class for things that aren't directly related to components or drivetrain
 class Advanced:
